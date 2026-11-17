@@ -10,10 +10,14 @@ import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridLayout;
 import java.awt.Insets;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
@@ -33,6 +37,7 @@ import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
 import javax.swing.table.DefaultTableCellRenderer;
@@ -49,6 +54,8 @@ import com.industria.monitor.model.enums.AcaoAlerta;
 import com.industria.monitor.model.enums.EstadoAlerta;
 import com.industria.monitor.model.enums.StatusProducao;
 import com.industria.monitor.model.enums.TipoRegra;
+import com.industria.monitor.simulacao.CenarioSimulacao;
+import com.industria.monitor.simulacao.SimuladorMaquina;
 
 public class MonitorDashboard extends JFrame {
 
@@ -62,12 +69,13 @@ public class MonitorDashboard extends JFrame {
 	private static final DateTimeFormatter REQUEST_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
 
 	private final MonitorApiClient api;
+	private final SimuladorMaquina simulador;
 	private final CardLayout pageLayout = new CardLayout();
 	private final JPanel pages = new JPanel(pageLayout);
 	private final DefaultTableModel overviewModel = tableModel("Máquina", "Produção / 5 min", "Limite", "Unidade", "Situação");
 	private final DefaultTableModel machineModel = tableModel("ID", "Máquina", "Unidade", "Limite mínimo", "Intervalo (s)", "Situação");
 	private final DefaultTableModel alertModel = tableModel("ID", "Máquina", "Regra", "Estado", "Criado em");
-	private final DefaultTableModel historyModel = tableModel("Início do intervalo", "Fim do intervalo", "Quantidade", "Unidade", "Recebido em");
+	private final DefaultTableModel historyModel = tableModel("Chave do evento", "Início do intervalo", "Fim do intervalo", "Quantidade", "Unidade", "Recebido em");
 	private final List<JButton> navigationButtons = new ArrayList<>();
 	private final JTable overviewTable = createTable(overviewModel, 4);
 	private final JTable machineTable = createTable(machineModel, 5);
@@ -86,6 +94,11 @@ public class MonitorDashboard extends JFrame {
 	private final JButton acknowledgeButton = new JButton("Reconhecer alerta");
 	private final JButton resolveButton = new JButton("Resolver alerta");
 	private final JButton historyRefreshButton = new JButton("Consultar histórico");
+	private final JButton simulationButton = new JButton("Iniciar simulação");
+	private final JButton generateDatasetButton = new JButton("Gerar CSV com 100 leituras");
+	private final JLabel simulationStatus = new JLabel("Simulação parada");
+	private final JLabel datasetStatus = new JLabel("Dataset ainda não gerado");
+	private boolean preparandoSimulacao;
 	private List<MaquinaResponseDTO> machines = List.of();
 	private List<AlertaResponseDTO> alerts = List.of();
 	private List<IndicadorProducaoResponseDTO> indicators = List.of();
@@ -94,6 +107,7 @@ public class MonitorDashboard extends JFrame {
 
 	public MonitorDashboard(MonitorApiClient api) {
 		this.api = api;
+		this.simulador = new SimuladorMaquina(api);
 		setTitle("Monitor de Produção");
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		setMinimumSize(new Dimension(1000, 680));
@@ -109,7 +123,15 @@ public class MonitorDashboard extends JFrame {
 		addReadingButton.addActionListener(event -> abrirRegistroLeitura());
 		acknowledgeButton.addActionListener(event -> executarAcaoAlerta(AcaoAlerta.RECONHECER));
 		resolveButton.addActionListener(event -> executarAcaoAlerta(AcaoAlerta.RESOLVER));
+		simulationButton.addActionListener(event -> alternarSimulacao());
+		generateDatasetButton.addActionListener(event -> gerarDataset());
 		alertTable.getSelectionModel().addListSelectionListener(event -> atualizarBotoesAlerta());
+		addWindowListener(new WindowAdapter() {
+			@Override
+			public void windowClosing(WindowEvent event) {
+				simulador.close();
+			}
+		});
 		new Timer(10000, event -> atualizarPainel()).start();
 		atualizarPainel();
 	}
@@ -148,6 +170,7 @@ public class MonitorDashboard extends JFrame {
 		navigation.add(navButton("  Máquinas", "machines", false));
 		navigation.add(navButton("  Alertas", "alerts", false));
 		navigation.add(navButton("  Histórico", "history", false));
+		navigation.add(navButton("  Simulação", "simulation", false));
 
 		JPanel sideContent = new JPanel(new BorderLayout());
 		sideContent.setOpaque(false);
@@ -216,6 +239,7 @@ public class MonitorDashboard extends JFrame {
 		pages.add(buildMachinesPage(), "machines");
 		pages.add(buildAlertsPage(), "alerts");
 		pages.add(buildHistoryPage(), "history");
+		pages.add(buildSimulationPage(), "simulation");
 		content.add(pages, BorderLayout.CENTER);
 		return content;
 	}
@@ -271,6 +295,50 @@ public class MonitorDashboard extends JFrame {
 		page.add(stats, BorderLayout.NORTH);
 		page.add(monitorCard, BorderLayout.CENTER);
 		return page;
+	}
+
+	private JPanel buildSimulationPage() {
+		JPanel page = cardPanel();
+		page.setLayout(new BorderLayout(0, 18));
+		page.add(sectionTitle("Simulador de máquinas"), BorderLayout.NORTH);
+
+		JPanel scenarios = new JPanel(new GridLayout(1, 3, 12, 0));
+		scenarios.setOpaque(false);
+		scenarios.add(scenarioCard("Produção normal",
+				CenarioSimulacao.PRODUCAO_NORMAL.descricao()));
+		scenarios.add(scenarioCard("Baixa produção",
+				CenarioSimulacao.BAIXA_PRODUCAO.descricao()));
+		scenarios.add(scenarioCard("Ausência de envio",
+				CenarioSimulacao.AUSENCIA_ENVIO.descricao()));
+
+		JPanel controls = new JPanel(new GridLayout(0, 1, 0, 8));
+		controls.setOpaque(false);
+		styleButton(simulationButton, true);
+		styleButton(generateDatasetButton, false);
+		simulationStatus.setForeground(NAVY);
+		datasetStatus.setForeground(MUTED);
+		controls.add(simulationButton);
+		controls.add(simulationStatus);
+		controls.add(generateDatasetButton);
+		controls.add(datasetStatus);
+
+		JPanel content = new JPanel(new BorderLayout(0, 20));
+		content.setOpaque(false);
+		content.add(scenarios, BorderLayout.NORTH);
+		content.add(controls, BorderLayout.CENTER);
+		page.add(content, BorderLayout.CENTER);
+		return page;
+	}
+
+	private JPanel scenarioCard(String title, String description) {
+		JPanel card = cardPanel();
+		card.setLayout(new BorderLayout(0, 10));
+		card.add(sectionTitle(title), BorderLayout.NORTH);
+		JLabel detail = new JLabel("<html>" + description + "</html>");
+		detail.setForeground(MUTED);
+		detail.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+		card.add(detail, BorderLayout.CENTER);
+		return card;
 	}
 
 	private JPanel buildMachinesPage() {
@@ -505,6 +573,7 @@ public class MonitorDashboard extends JFrame {
 					.sorted(java.util.Comparator.comparing(LeituraResponseDTO::inicioIntervalo).reversed())
 					.toList()) {
 				historyModel.addRow(new Object[] {
+						reading.chaveEvento(),
 						reading.inicioIntervalo().format(DATE_FORMAT),
 						reading.fimIntervalo().format(DATE_FORMAT),
 						reading.quantidade().stripTrailingZeros().toPlainString(),
@@ -513,6 +582,62 @@ public class MonitorDashboard extends JFrame {
 				});
 			}
 		}, exception -> exibirErro("Não foi possível carregar o histórico de leituras.", exception));
+	}
+
+	private void alternarSimulacao() {
+		if (simulador.isExecutando()) {
+			simulador.parar();
+			simulationButton.setText("Iniciar simulação");
+			simulationStatus.setText("Simulação parada");
+			return;
+		}
+		if (preparandoSimulacao) {
+			return;
+		}
+		preparandoSimulacao = true;
+		simulationButton.setEnabled(false);
+		runAsync(simulador::garantirMaquinas, maquinas -> {
+			preparandoSimulacao = false;
+			simulationButton.setEnabled(true);
+			try {
+				simulador.iniciar(
+						maquinas,
+						mensagem -> SwingUtilities.invokeLater(() -> simulationStatus.setText(mensagem)),
+						exception -> SwingUtilities.invokeLater(() -> {
+							LOGGER.log(Level.WARNING, "Falha no envio periódico do simulador", exception);
+							simulationStatus.setText("Falha no envio; nova tentativa em 60 segundos: "
+									+ exception.getMessage());
+						}));
+				simulationButton.setText("Parar simulação");
+				simulationStatus.setText("Simulação ativa: duas máquinas enviam a cada 60 segundos; uma fica sem envio.");
+			} catch (RuntimeException exception) {
+				exibirErro("Não foi possível iniciar o simulador.", exception);
+			}
+		}, exception -> {
+			preparandoSimulacao = false;
+			simulationButton.setEnabled(true);
+			exibirErro("Não foi possível preparar as máquinas da simulação.", exception);
+		});
+	}
+
+	private void gerarDataset() {
+		if (preparandoSimulacao) {
+			return;
+		}
+		preparandoSimulacao = true;
+		generateDatasetButton.setEnabled(false);
+		runAsync(() -> {
+			Map<CenarioSimulacao, MaquinaResponseDTO> maquinas = simulador.garantirMaquinas();
+			return simulador.exportarConjuntoDe100(maquinas, Path.of("dados", "leituras_sinteticas.csv"));
+		}, arquivo -> {
+			preparandoSimulacao = false;
+			generateDatasetButton.setEnabled(true);
+			datasetStatus.setText("100 leituras gravadas em " + arquivo);
+		}, exception -> {
+			preparandoSimulacao = false;
+			generateDatasetButton.setEnabled(true);
+			exibirErro("Não foi possível gerar o conjunto sintético.", exception);
+		});
 	}
 
 	private void atualizarResumo() {

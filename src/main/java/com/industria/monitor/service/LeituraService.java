@@ -5,6 +5,7 @@ import java.math.MathContext;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -49,7 +50,9 @@ public class LeituraService {
 		if (dto.maquinaId() == null || dto.inicioIntervalo() == null || dto.fimIntervalo() == null
 				|| !dto.inicioIntervalo().isBefore(dto.fimIntervalo())
 				|| dto.quantidade() == null || dto.quantidade().signum() < 0
-				|| dto.unidade() == null || dto.unidade().isBlank()) {
+				|| dto.unidade() == null || dto.unidade().isBlank()
+				|| (dto.chaveEvento() != null
+						&& (dto.chaveEvento().isBlank() || dto.chaveEvento().length() > 64))) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Dados da leitura inválidos");
 		}
 
@@ -63,6 +66,9 @@ public class LeituraService {
 			throw new ResponseStatusException(HttpStatus.CONFLICT,
 					"Leitura já registrada para essa máquina nesse período");
 		}
+		if (dto.chaveEvento() != null && repository.existsByChaveEvento(dto.chaveEvento())) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "Chave de evento já utilizada");
+		}
 
 		Maquina maquina = maquinaRepository.findById(dto.maquinaId())
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Máquina não encontrada"));
@@ -72,6 +78,7 @@ public class LeituraService {
 		leitura.setFimIntervalo(dto.fimIntervalo());
 		leitura.setQuantidade(dto.quantidade());
 		leitura.setUnidade(dto.unidade());
+		leitura.setChaveEvento(dto.chaveEvento() == null ? UUID.randomUUID().toString() : dto.chaveEvento());
 
 		Leitura leituraSalva = repository.save(leitura);
 		LocalDateTime agora = LocalDateTime.now();

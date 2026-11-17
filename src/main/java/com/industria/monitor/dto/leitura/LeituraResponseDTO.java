@@ -12,6 +12,7 @@ public record LeituraResponseDTO(
     LocalDateTime fimIntervalo,
     BigDecimal quantidade,
     String unidade,
+    String chaveEvento,
     LocalDateTime criadoEm
 ) {
     public static LeituraResponseDTO fromEntity(Leitura leitura) {
@@ -22,6 +23,7 @@ public record LeituraResponseDTO(
             leitura.getFimIntervalo(),
             leitura.getQuantidade(),
             leitura.getUnidade(),
+            leitura.getChaveEvento(),
             leitura.getCriadoEm()
         );
     }

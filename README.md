@@ -24,3 +24,9 @@ $env:MONITOR_API_URL = "http://localhost:8080/"
 ```
 
 O painel atualiza os dados periodicamente e também oferece o botão **Atualizar agora**. As requisições HTTP são executadas em segundo plano para manter a interface responsiva.
+
+## Simulador de máquinas
+
+Na seção **Simulação** do cliente, **Iniciar simulação** cadastra (se necessário) três máquinas e envia leituras a cada 60 segundos para os cenários de produção normal e baixa. A máquina do cenário de ausência fica cadastrada sem receber leituras para permitir a detecção de ausência pela API. **Gerar CSV com 100 leituras** cria `dados/leituras_sinteticas.csv`, com 100 registros, intervalo, quantidade, unidade e chave do evento.
+
+Para instalações existentes usando o perfil `prod`, aplique uma vez o script `src/main/resources/db/migration/V2__chave_evento_leitura.sql` no banco antes de iniciar a nova versão. O perfil `dev` atualiza a estrutura automaticamente.

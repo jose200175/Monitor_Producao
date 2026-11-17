@@ -33,6 +33,9 @@ public class Leitura implements Serializable {
 	
 	@Column(name = "unidade", nullable = false)
 	private String unidade;
+
+	@Column(name = "chave_evento", nullable = false, unique = true, length = 64)
+	private String chaveEvento;
 	
 	@CreatedDate
 	@Column(name="criado_em", nullable= false, updatable = false)
@@ -89,6 +92,14 @@ public class Leitura implements Serializable {
 
 	public void setUnidade(String unidade) {
 		this.unidade = unidade;
+	}
+
+	public String getChaveEvento() {
+		return chaveEvento;
+	}
+
+	public void setChaveEvento(String chaveEvento) {
+		this.chaveEvento = chaveEvento;
 	}
 
 	public LocalDateTime getCriadoEm() {

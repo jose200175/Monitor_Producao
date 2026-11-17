@@ -60,8 +60,8 @@ public class MonitorApiClient {
 				new TypeReference<List<LeituraResponseDTO>>() {});
 	}
 
-	public void cadastrarMaquina(MaquinaRequestDTO maquina) throws IOException, InterruptedException {
-		enviar("POST", "maquinas", maquina);
+	public MaquinaResponseDTO cadastrarMaquina(MaquinaRequestDTO maquina) throws IOException, InterruptedException {
+		return objectMapper.readValue(enviar("POST", "maquinas", maquina), MaquinaResponseDTO.class);
 	}
 
 	public void cadastrarLeitura(LeituraRequestDTO leitura) throws IOException, InterruptedException {

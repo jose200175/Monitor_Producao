@@ -8,5 +8,15 @@ public record LeituraRequestDTO(
 	   	LocalDateTime inicioIntervalo,
 	    LocalDateTime fimIntervalo,
 	    BigDecimal quantidade,
-	    String unidade
-	) {}
+	    String unidade,
+	    String chaveEvento
+) {
+	public LeituraRequestDTO(
+			Long maquinaId,
+			LocalDateTime inicioIntervalo,
+			LocalDateTime fimIntervalo,
+			BigDecimal quantidade,
+			String unidade) {
+		this(maquinaId, inicioIntervalo, fimIntervalo, quantidade, unidade, null);
+	}
+}

@@ -2,6 +2,7 @@ package com.industria.monitor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.industria.monitor.dto.leitura.LeituraRequestDTO;
+import com.industria.monitor.dto.leitura.LeituraResponseDTO;
 import com.industria.monitor.dto.maquina.IndicadorProducaoResponseDTO;
 import com.industria.monitor.model.Alerta;
 import com.industria.monitor.model.Leitura;
@@ -115,6 +117,26 @@ class MonitorProducaoRegrasTests {
 		assertEquals(1, leituraRepository.findByMaquinaId(maquina.getId()).orElse(List.of()).size());
 	}
 
+	@Test
+	void geraChaveDeEventoParaLeituraManualERejeitaChaveDuplicada() {
+		Maquina maquina = criarMaquina("Envasadora", "1");
+		LocalDateTime inicio = LocalDateTime.now().minusMinutes(2);
+		String chaveEvento = "evento-manual-001";
+		LeituraResponseDTO response = leituraService.cadastrarLeitura(new LeituraRequestDTO(
+				maquina.getId(), inicio, inicio.plusSeconds(30), BigDecimal.ONE, "un"));
+
+		assertNotNull(response.chaveEvento());
+		leituraService.cadastrarLeitura(new LeituraRequestDTO(
+				maquina.getId(), inicio.plusMinutes(1), inicio.plusMinutes(1).plusSeconds(30),
+				BigDecimal.ONE, "un", chaveEvento));
+		ResponseStatusException exception = assertThrows(ResponseStatusException.class,
+				() -> leituraService.cadastrarLeitura(new LeituraRequestDTO(
+						maquina.getId(), inicio.plusMinutes(2), inicio.plusMinutes(2).plusSeconds(30),
+						BigDecimal.ONE, "un", chaveEvento)));
+
+		assertEquals(HttpStatus.CONFLICT, exception.getStatusCode());
+	}
+
 	private Maquina criarMaquina(String nome, String limite) {
 		Maquina maquina = new Maquina();
 		maquina.setNome(nome);
@@ -131,6 +153,7 @@ class MonitorProducaoRegrasTests {
 		leitura.setFimIntervalo(fim);
 		leitura.setQuantidade(new BigDecimal(quantidade));
 		leitura.setUnidade(maquina.getUnidade());
+		leitura.setChaveEvento(java.util.UUID.randomUUID().toString());
 		leituraRepository.save(leitura);
 	}
 }
