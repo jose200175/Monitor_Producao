@@ -1,6 +1,6 @@
 # Monitor de Produção
 
-Aplicação de monitoramento industrial composta por uma API REST Spring Boot e um cliente desktop Swing. O painel consulta a API, acompanha indicadores na janela móvel de cinco minutos, permite cadastrar máquinas e registrar leituras, trata alertas e consulta o histórico de produção.
+Aplicação de monitoramento industrial composta por uma API REST Spring Boot e um cliente desktop Swing. O painel consulta a API, acompanha indicadores na janela móvel de cinco minutos, compara produção e limite mínimo em um gráfico, exibe a série temporal das leituras no histórico, permite cadastrar máquinas e registrar leituras e trata alertas. As legendas identificam as cores e, ao passar o mouse sobre os gráficos, são exibidos os valores correspondentes.
 
 ## Executar localmente
 

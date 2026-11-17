@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
@@ -36,6 +37,7 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
@@ -86,6 +88,8 @@ public class MonitorDashboard extends JFrame {
 	private final JTable alertTable = createTable(alertModel, 3);
 	private final JTable historyTable = createTable(historyModel, -1);
 	private final JComboBox<MaquinaResponseDTO> historyMachine = new JComboBox<>();
+	private final GraficoIndicadores graficoIndicadores = new GraficoIndicadores();
+	private final GraficoHistorico graficoHistorico = new GraficoHistorico();
 	private final JLabel machineCount = new JLabel("—");
 	private final JLabel normalCount = new JLabel("—");
 	private final JLabel attentionCount = new JLabel("—");
@@ -104,7 +108,9 @@ public class MonitorDashboard extends JFrame {
 	private final JButton generateDatasetButton = new JButton("Gerar CSV com 100 leituras");
 	private final JLabel simulationStatus = new JLabel("Simulação parada");
 	private final JLabel datasetStatus = new JLabel("Dataset ainda não gerado");
+	private final JLabel historyChartTitle = sectionTitle("Quantidade por intervalo");
 	private boolean preparandoSimulacao;
+	private boolean atualizandoOpcoesDeMaquinas;
 	private List<MaquinaResponseDTO> machines = List.of();
 	private List<AlertaResponseDTO> alerts = List.of();
 	private List<IndicadorProducaoResponseDTO> indicators = List.of();
@@ -133,7 +139,14 @@ public class MonitorDashboard extends JFrame {
 		generateDatasetButton.addActionListener(event -> gerarDataset());
 		exportReadingsButton.addActionListener(event -> exportarLeituras());
 		exportIndicatorsButton.addActionListener(event -> exportarIndicadores());
-		historyMachine.addActionListener(event -> atualizarBotaoExportarLeituras());
+		historyMachine.addActionListener(event -> {
+			if (!atualizandoOpcoesDeMaquinas) {
+				atualizarBotaoExportarLeituras();
+				graficoHistorico.setLeituras(List.of());
+				historyModel.setRowCount(0);
+				atualizarTituloGraficoHistorico();
+			}
+		});
 		alertTable.getSelectionModel().addListSelectionListener(event -> atualizarBotoesAlerta());
 		addWindowListener(new WindowAdapter() {
 			@Override
@@ -306,7 +319,26 @@ public class MonitorDashboard extends JFrame {
 		cardActions.add(exportIndicatorsButton);
 		cardHeader.add(cardActions, BorderLayout.EAST);
 		monitorCard.add(cardHeader, BorderLayout.NORTH);
-		monitorCard.add(tableScroll(overviewTable), BorderLayout.CENTER);
+
+		JPanel chartCard = cardPanel();
+		chartCard.setLayout(new BorderLayout(0, 8));
+		chartCard.add(sectionTitle("Produção x limite mínimo — janela de 5 minutos"), BorderLayout.NORTH);
+		JScrollPane chartScroll = new JScrollPane(
+				graficoIndicadores,
+				JScrollPane.VERTICAL_SCROLLBAR_NEVER,
+				JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+		chartScroll.setBorder(BorderFactory.createLineBorder(BORDER));
+		chartScroll.getViewport().setBackground(Color.WHITE);
+		chartCard.add(chartScroll, BorderLayout.CENTER);
+
+		JSplitPane overviewSplit = new JSplitPane(
+				JSplitPane.VERTICAL_SPLIT, chartCard, tableScroll(overviewTable));
+		overviewSplit.setResizeWeight(0.48);
+		overviewSplit.setDividerLocation(240);
+		overviewSplit.setContinuousLayout(true);
+		overviewSplit.setBorder(null);
+		overviewSplit.setOpaque(false);
+		monitorCard.add(overviewSplit, BorderLayout.CENTER);
 		page.add(stats, BorderLayout.NORTH);
 		page.add(monitorCard, BorderLayout.CENTER);
 		return page;
@@ -416,7 +448,25 @@ public class MonitorDashboard extends JFrame {
 		filters.add(exportReadingsButton);
 		cardHeader.add(filters, BorderLayout.EAST);
 		page.add(cardHeader, BorderLayout.NORTH);
-		page.add(tableScroll(historyTable), BorderLayout.CENTER);
+		JPanel chartCard = cardPanel();
+		chartCard.setLayout(new BorderLayout(0, 8));
+		chartCard.add(historyChartTitle, BorderLayout.NORTH);
+		JScrollPane chartScroll = new JScrollPane(
+				graficoHistorico,
+				JScrollPane.VERTICAL_SCROLLBAR_NEVER,
+				JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		chartScroll.setBorder(BorderFactory.createLineBorder(BORDER));
+		chartScroll.getViewport().setBackground(Color.WHITE);
+		chartCard.add(chartScroll, BorderLayout.CENTER);
+
+		JSplitPane historySplit = new JSplitPane(
+				JSplitPane.VERTICAL_SPLIT, chartCard, tableScroll(historyTable));
+		historySplit.setResizeWeight(0.43);
+		historySplit.setDividerLocation(230);
+		historySplit.setContinuousLayout(true);
+		historySplit.setBorder(null);
+		historySplit.setOpaque(false);
+		page.add(historySplit, BorderLayout.CENTER);
 		return page;
 	}
 
@@ -513,6 +563,7 @@ public class MonitorDashboard extends JFrame {
 			machines = snapshot.machines();
 			indicators = snapshot.indicators();
 			alerts = snapshot.alerts();
+			graficoIndicadores.setDados(machines, indicators);
 			exportIndicatorsButton.setEnabled(!machines.isEmpty() && machines.size() == indicators.size());
 			popularTabelas();
 			atualizarResumo();
@@ -534,13 +585,26 @@ public class MonitorDashboard extends JFrame {
 	private void popularTabelas() {
 		Long selectedMachineId = historyMachine.getSelectedItem() instanceof MaquinaResponseDTO selected
 				? selected.id() : null;
-		historyMachine.removeAllItems();
-		for (MaquinaResponseDTO machine : machines) {
-			historyMachine.addItem(machine);
-			if (machine.id().equals(selectedMachineId)) {
-				historyMachine.setSelectedItem(machine);
+		atualizandoOpcoesDeMaquinas = true;
+		try {
+			historyMachine.removeAllItems();
+			for (MaquinaResponseDTO machine : machines) {
+				historyMachine.addItem(machine);
+				if (machine.id().equals(selectedMachineId)) {
+					historyMachine.setSelectedItem(machine);
+				}
 			}
+		} finally {
+			atualizandoOpcoesDeMaquinas = false;
 		}
+		Long maquinaSelecionada = historyMachine.getSelectedItem() instanceof MaquinaResponseDTO selected
+				? selected.id() : null;
+		if (!Objects.equals(selectedMachineId, maquinaSelecionada)) {
+			graficoHistorico.setLeituras(List.of());
+			historyModel.setRowCount(0);
+			atualizarTituloGraficoHistorico();
+		}
+		atualizarBotaoExportarLeituras();
 
 		overviewModel.setRowCount(0);
 		machineModel.setRowCount(0);
@@ -591,6 +655,8 @@ public class MonitorDashboard extends JFrame {
 					|| !currentMachine.id().equals(selectedMachine.id())) {
 				return;
 			}
+			graficoHistorico.setLeituras(readings);
+			historyChartTitle.setText("Quantidade por intervalo — " + currentMachine.nome());
 			historyModel.setRowCount(0);
 			for (LeituraResponseDTO reading : readings.stream()
 					.sorted(java.util.Comparator.comparing(LeituraResponseDTO::inicioIntervalo).reversed())
@@ -632,6 +698,14 @@ public class MonitorDashboard extends JFrame {
 
 	private void atualizarBotaoExportarLeituras() {
 		exportReadingsButton.setEnabled(historyMachine.getSelectedItem() instanceof MaquinaResponseDTO);
+	}
+
+	private void atualizarTituloGraficoHistorico() {
+		if (historyMachine.getSelectedItem() instanceof MaquinaResponseDTO maquina) {
+			historyChartTitle.setText("Quantidade por intervalo — " + maquina.nome());
+		} else {
+			historyChartTitle.setText("Quantidade por intervalo");
+		}
 	}
 
 	private void exportarIndicadores() {
