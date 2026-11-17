@@ -2,18 +2,13 @@ package com.industria.monitor.model;
 
 
 import jakarta.persistence.*;
-import lombok.*;
 import java.io.Serializable;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Entity
 @Table(name= "maquinas")
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
 public class Maquina implements Serializable {
 	
 	private static final long serialVersionUID = 1L;
@@ -33,10 +28,82 @@ public class Maquina implements Serializable {
 	
 	@Column(name = "intervalo_seg", nullable = false, columnDefinition = "DECIMAL(10,2) DEFAULT 60.00")
     private BigDecimal intervaloSeg;
+
+	@Column(name = "criado_em", nullable = false, updatable = false)
+	private LocalDateTime criadoEm;
 	
 	@OneToMany(mappedBy = "maquina", cascade = CascadeType.ALL)
 	private List<Leitura> leituras;
 	
 	@OneToMany(mappedBy = "maquina", cascade = CascadeType.ALL)
 	private List<Alerta> alertas;
+
+	@PrePersist
+	protected void onCreate() {
+		this.criadoEm = LocalDateTime.now();
+	}
+
+	public Long getId() {
+		return id;
+	}
+
+	public void setId(Long id) {
+		this.id = id;
+	}
+
+	public String getNome() {
+		return nome;
+	}
+
+	public void setNome(String nome) {
+		this.nome = nome;
+	}
+
+	public String getUnidade() {
+		return unidade;
+	}
+
+	public void setUnidade(String unidade) {
+		this.unidade = unidade;
+	}
+
+	public BigDecimal getLimiteMin() {
+		return limiteMin;
+	}
+
+	public void setLimiteMin(BigDecimal limiteMin) {
+		this.limiteMin = limiteMin;
+	}
+
+	public BigDecimal getIntervaloSeg() {
+		return intervaloSeg;
+	}
+
+	public void setIntervaloSeg(BigDecimal intervaloSeg) {
+		this.intervaloSeg = intervaloSeg;
+	}
+
+	public LocalDateTime getCriadoEm() {
+		return criadoEm;
+	}
+
+	public void setCriadoEm(LocalDateTime criadoEm) {
+		this.criadoEm = criadoEm;
+	}
+
+	public List<Leitura> getLeituras() {
+		return leituras;
+	}
+
+	public void setLeituras(List<Leitura> leituras) {
+		this.leituras = leituras;
+	}
+
+	public List<Alerta> getAlertas() {
+		return alertas;
+	}
+
+	public void setAlertas(List<Alerta> alertas) {
+		this.alertas = alertas;
+	}
 }
