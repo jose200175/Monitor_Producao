@@ -25,6 +25,29 @@ $env:MONITOR_API_URL = "http://localhost:8080/"
 
 O painel atualiza os dados periodicamente e também oferece o botão **Atualizar agora**. As requisições HTTP são executadas em segundo plano para manter a interface responsiva.
 
+## Executar os testes
+
+No PowerShell, abra a pasta raiz do projeto e execute todos os testes com o Maven Wrapper:
+
+```powershell
+.\mvnw.cmd test
+```
+
+Para limpar os resultados anteriores antes de testar:
+
+```powershell
+.\mvnw.cmd clean test
+```
+
+É possível executar uma classe específica pelo nome, por exemplo:
+
+```powershell
+.\mvnw.cmd -Dtest=MonitorProducaoRegrasTests test
+.\mvnw.cmd -Dtest=ExportadorCsvTests test
+```
+
+Os resultados detalhados ficam em `target/surefire-reports`. Use Java 17 ou superior e configure `JAVA_HOME` para o JDK instalado.
+
 ## Simulador de máquinas
 
 Na seção **Simulação** do cliente, **Iniciar simulação** cadastra (se necessário) três máquinas e envia leituras a cada 60 segundos para os cenários de produção normal e baixa. A máquina do cenário de ausência fica cadastrada sem receber leituras para permitir a detecção de ausência pela API. **Gerar CSV com 100 leituras** cria `dados/leituras_sinteticas.csv`, com 100 registros, intervalo, quantidade, unidade e chave do evento.
