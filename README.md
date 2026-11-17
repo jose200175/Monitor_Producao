@@ -30,3 +30,7 @@ O painel atualiza os dados periodicamente e também oferece o botão **Atualizar
 Na seção **Simulação** do cliente, **Iniciar simulação** cadastra (se necessário) três máquinas e envia leituras a cada 60 segundos para os cenários de produção normal e baixa. A máquina do cenário de ausência fica cadastrada sem receber leituras para permitir a detecção de ausência pela API. **Gerar CSV com 100 leituras** cria `dados/leituras_sinteticas.csv`, com 100 registros, intervalo, quantidade, unidade e chave do evento.
 
 Para instalações existentes usando o perfil `prod`, aplique uma vez o script `src/main/resources/db/migration/V2__chave_evento_leitura.sql` no banco antes de iniciar a nova versão. O perfil `dev` atualiza a estrutura automaticamente.
+
+## Exportar dados
+
+Na visão geral, use **Exportar indicadores CSV** para salvar os indicadores exibidos. No histórico, selecione uma máquina, consulte suas leituras e use **Exportar leituras CSV**. Os arquivos são gravados em UTF-8; campos com vírgulas, aspas ou quebras de linha são escapados no formato CSV.

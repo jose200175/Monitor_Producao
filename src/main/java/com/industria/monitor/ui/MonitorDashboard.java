@@ -12,11 +12,13 @@ import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -28,6 +30,7 @@ import javax.swing.BorderFactory;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -50,6 +53,7 @@ import com.industria.monitor.dto.leitura.LeituraResponseDTO;
 import com.industria.monitor.dto.maquina.IndicadorProducaoResponseDTO;
 import com.industria.monitor.dto.maquina.MaquinaRequestDTO;
 import com.industria.monitor.dto.maquina.MaquinaResponseDTO;
+import com.industria.monitor.exportacao.ExportadorCsv;
 import com.industria.monitor.model.enums.AcaoAlerta;
 import com.industria.monitor.model.enums.EstadoAlerta;
 import com.industria.monitor.model.enums.StatusProducao;
@@ -94,6 +98,8 @@ public class MonitorDashboard extends JFrame {
 	private final JButton acknowledgeButton = new JButton("Reconhecer alerta");
 	private final JButton resolveButton = new JButton("Resolver alerta");
 	private final JButton historyRefreshButton = new JButton("Consultar histórico");
+	private final JButton exportReadingsButton = new JButton("Exportar leituras CSV");
+	private final JButton exportIndicatorsButton = new JButton("Exportar indicadores CSV");
 	private final JButton simulationButton = new JButton("Iniciar simulação");
 	private final JButton generateDatasetButton = new JButton("Gerar CSV com 100 leituras");
 	private final JLabel simulationStatus = new JLabel("Simulação parada");
@@ -125,6 +131,9 @@ public class MonitorDashboard extends JFrame {
 		resolveButton.addActionListener(event -> executarAcaoAlerta(AcaoAlerta.RESOLVER));
 		simulationButton.addActionListener(event -> alternarSimulacao());
 		generateDatasetButton.addActionListener(event -> gerarDataset());
+		exportReadingsButton.addActionListener(event -> exportarLeituras());
+		exportIndicatorsButton.addActionListener(event -> exportarIndicadores());
+		historyMachine.addActionListener(event -> atualizarBotaoExportarLeituras());
 		alertTable.getSelectionModel().addListSelectionListener(event -> atualizarBotoesAlerta());
 		addWindowListener(new WindowAdapter() {
 			@Override
@@ -289,7 +298,13 @@ public class MonitorDashboard extends JFrame {
 		JLabel window = new JLabel("JANELA MÓVEL  •  5 MIN");
 		window.setForeground(BLUE);
 		window.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 10));
-		cardHeader.add(window, BorderLayout.EAST);
+		styleButton(exportIndicatorsButton, false);
+		exportIndicatorsButton.setEnabled(false);
+		JPanel cardActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+		cardActions.setOpaque(false);
+		cardActions.add(window);
+		cardActions.add(exportIndicatorsButton);
+		cardHeader.add(cardActions, BorderLayout.EAST);
 		monitorCard.add(cardHeader, BorderLayout.NORTH);
 		monitorCard.add(tableScroll(overviewTable), BorderLayout.CENTER);
 		page.add(stats, BorderLayout.NORTH);
@@ -393,9 +408,12 @@ public class MonitorDashboard extends JFrame {
 		historyMachine.setRenderer((list, value, index, selected, focused) ->
 				new JLabel(value == null ? "" : value.nome() + "  ·  " + value.unidade()));
 		styleButton(historyRefreshButton, true);
+		styleButton(exportReadingsButton, false);
+		exportReadingsButton.setEnabled(false);
 		historyRefreshButton.addActionListener(event -> carregarHistorico());
 		filters.add(historyMachine);
 		filters.add(historyRefreshButton);
+		filters.add(exportReadingsButton);
 		cardHeader.add(filters, BorderLayout.EAST);
 		page.add(cardHeader, BorderLayout.NORTH);
 		page.add(tableScroll(historyTable), BorderLayout.CENTER);
@@ -495,6 +513,7 @@ public class MonitorDashboard extends JFrame {
 			machines = snapshot.machines();
 			indicators = snapshot.indicators();
 			alerts = snapshot.alerts();
+			exportIndicatorsButton.setEnabled(!machines.isEmpty() && machines.size() == indicators.size());
 			popularTabelas();
 			atualizarResumo();
 			connectionErrorShown = false;
@@ -568,6 +587,10 @@ public class MonitorDashboard extends JFrame {
 			return;
 		}
 		runAsync(() -> api.listarLeituras(selectedMachine.id()), readings -> {
+			if (!(historyMachine.getSelectedItem() instanceof MaquinaResponseDTO currentMachine)
+					|| !currentMachine.id().equals(selectedMachine.id())) {
+				return;
+			}
 			historyModel.setRowCount(0);
 			for (LeituraResponseDTO reading : readings.stream()
 					.sorted(java.util.Comparator.comparing(LeituraResponseDTO::inicioIntervalo).reversed())
@@ -582,6 +605,76 @@ public class MonitorDashboard extends JFrame {
 				});
 			}
 		}, exception -> exibirErro("Não foi possível carregar o histórico de leituras.", exception));
+	}
+
+	private void exportarLeituras() {
+		if (!(historyMachine.getSelectedItem() instanceof MaquinaResponseDTO maquina)) {
+			exibirErro("Selecione uma máquina antes de exportar as leituras.", null);
+			return;
+		}
+		Path destino = selecionarArquivoCsv("leituras.csv");
+		if (destino == null) {
+			return;
+		}
+		exportReadingsButton.setEnabled(false);
+		runAsync(() -> {
+			List<LeituraResponseDTO> leituras = api.listarLeituras(maquina.id());
+			return ExportadorCsv.exportarLeituras(destino, maquina, leituras);
+		}, arquivo -> {
+			atualizarBotaoExportarLeituras();
+			JOptionPane.showMessageDialog(this, "Leituras exportadas para:\n" + arquivo,
+					"Exportação concluída", JOptionPane.INFORMATION_MESSAGE);
+		}, exception -> {
+			atualizarBotaoExportarLeituras();
+			exibirErro("Não foi possível exportar as leituras.", exception);
+		});
+	}
+
+	private void atualizarBotaoExportarLeituras() {
+		exportReadingsButton.setEnabled(historyMachine.getSelectedItem() instanceof MaquinaResponseDTO);
+	}
+
+	private void exportarIndicadores() {
+		if (machines.isEmpty() || machines.size() != indicators.size()) {
+			exibirErro("Atualize o painel antes de exportar os indicadores.", null);
+			return;
+		}
+		Path destino = selecionarArquivoCsv("indicadores.csv");
+		if (destino == null) {
+			return;
+		}
+		List<MaquinaResponseDTO> maquinas = List.copyOf(machines);
+		List<IndicadorProducaoResponseDTO> indicadores = List.copyOf(indicators);
+		exportIndicatorsButton.setEnabled(false);
+		runAsync(() -> ExportadorCsv.exportarIndicadores(destino, maquinas, indicadores), arquivo -> {
+			exportIndicatorsButton.setEnabled(true);
+			JOptionPane.showMessageDialog(this, "Indicadores exportados para:\n" + arquivo,
+					"Exportação concluída", JOptionPane.INFORMATION_MESSAGE);
+		}, exception -> {
+			exportIndicatorsButton.setEnabled(true);
+			exibirErro("Não foi possível exportar os indicadores.", exception);
+		});
+	}
+
+	private Path selecionarArquivoCsv(String nomePadrao) {
+		JFileChooser chooser = new JFileChooser();
+		chooser.setDialogTitle("Exportar dados para CSV");
+		chooser.setSelectedFile(Path.of(nomePadrao).toFile());
+		if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+			return null;
+		}
+
+		Path destino = chooser.getSelectedFile().toPath();
+		if (!destino.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".csv")) {
+			destino = destino.resolveSibling(destino.getFileName() + ".csv");
+		}
+		if (Files.exists(destino)
+				&& JOptionPane.showConfirmDialog(this, "O arquivo já existe. Deseja substituí-lo?",
+						"Confirmar substituição", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
+						!= JOptionPane.YES_OPTION) {
+			return null;
+		}
+		return destino;
 	}
 
 	private void alternarSimulacao() {
