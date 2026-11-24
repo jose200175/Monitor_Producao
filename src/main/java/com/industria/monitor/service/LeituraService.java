@@ -15,6 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.industria.monitor.dto.leitura.LeituraRequestDTO;
 import com.industria.monitor.dto.leitura.LeituraResponseDTO;
 import com.industria.monitor.dto.maquina.IndicadorProducaoResponseDTO;
+import com.industria.monitor.configuracao.ConfiguracaoMonitoramentoRuntime;
 import com.industria.monitor.model.Leitura;
 import com.industria.monitor.model.Maquina;
 import com.industria.monitor.model.enums.StatusProducao;
@@ -27,22 +28,23 @@ import jakarta.validation.Valid;
 @Service
 public class LeituraService {
 
-	private static final Duration JANELA_INDICADORES = Duration.ofMinutes(5);
-
 	private final LeituraRepository repository;
 	private final MaquinaRepository maquinaRepository;
 	private final AlertaService alertaService;
 	private final MonitoramentoAusenciaService ausenciaService;
+	private final ConfiguracaoMonitoramentoRuntime configuracao;
 
 	public LeituraService(
 			MaquinaRepository maquinaRepository,
 			LeituraRepository repository,
 			AlertaService alertaService,
-			MonitoramentoAusenciaService ausenciaService) {
+			MonitoramentoAusenciaService ausenciaService,
+			ConfiguracaoMonitoramentoRuntime configuracao) {
 		this.repository = repository;
 		this.maquinaRepository = maquinaRepository;
 		this.alertaService = alertaService;
 		this.ausenciaService = ausenciaService;
+		this.configuracao = configuracao;
 	}
 
 	@Transactional
@@ -117,7 +119,7 @@ public class LeituraService {
 
 		return new IndicadorProducaoResponseDTO(
 				maquina.getId(),
-				agora.minus(JANELA_INDICADORES),
+				agora.minus(configuracao.getJanelaIndicadores()),
 				agora,
 				quantidade,
 				maquina.getLimiteMin(),
@@ -126,7 +128,7 @@ public class LeituraService {
 	}
 
 	private BigDecimal calcularQuantidade(Maquina maquina, LocalDateTime agora) {
-		LocalDateTime inicioJanela = agora.minus(JANELA_INDICADORES);
+		LocalDateTime inicioJanela = agora.minus(configuracao.getJanelaIndicadores());
 		List<Leitura> leituras = repository.findByMaquinaIdAndFimIntervaloAfterAndInicioIntervaloBefore(
 				maquina.getId(), inicioJanela, agora);
 

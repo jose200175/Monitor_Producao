@@ -72,6 +72,20 @@ public class MonitorApiClient {
 		enviar("PATCH", "alertas/" + alertaId, Map.of("acao", acao.name()));
 	}
 
+	public int buscarJanelaIndicadoresSegundos() throws IOException, InterruptedException {
+		byte[] resposta = enviar("GET", "configuracoes", null);
+		Map<?, ?> configuracao = objectMapper.readValue(resposta, Map.class);
+		Object segundos = configuracao.get("janelaIndicadoresSegundos");
+		return segundos == null ? 300 : Integer.parseInt(segundos.toString());
+	}
+
+	public int alterarJanelaIndicadoresSegundos(int segundos) throws IOException, InterruptedException {
+		byte[] resposta = enviar("PUT", "configuracoes",
+				Map.of("janelaIndicadoresSegundos", segundos));
+		Map<?, ?> configuracao = objectMapper.readValue(resposta, Map.class);
+		return Integer.parseInt(configuracao.get("janelaIndicadoresSegundos").toString());
+	}
+
 	private byte[] enviar(String method, String path, Object body) throws IOException, InterruptedException {
 		HttpRequest.Builder request = HttpRequest.newBuilder(baseUri.resolve(path))
 				.timeout(Duration.ofSeconds(10))

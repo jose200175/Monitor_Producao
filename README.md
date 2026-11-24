@@ -57,3 +57,11 @@ Para instalações existentes usando o perfil `prod`, aplique uma vez o script `
 ## Exportar dados
 
 Na visão geral, use **Exportar indicadores CSV** para salvar os indicadores exibidos. No histórico, selecione uma máquina, consulte suas leituras e use **Exportar leituras CSV**. Os arquivos são gravados em UTF-8; campos com vírgulas, aspas ou quebras de linha são escapados no formato CSV.
+
+## Importar leituras e configurar o monitoramento
+
+Na barra lateral, use **Importação CSV** para selecionar um arquivo de leituras. O cabeçalho deve conter `maquina_id`, `inicio_intervalo`, `fim_intervalo`, `quantidade` e `unidade`; `chave_evento` é opcional. Linhas válidas são enviadas à API e linhas rejeitadas aparecem na tabela do painel com o número da linha e o motivo.
+
+Use **Configurações** para salvar ou restaurar o arquivo binário `monitor-config.dat`. O arquivo contém assinatura, versão, janela de indicadores, limite de ausência e os limites e intervalos das máquinas monitoradas. Se o cliente Swing já estiver aberto, feche-o e execute novamente `.\mvnw.cmd exec:java` para carregar a interface atualizada.
+
+Na página **Configurações**, informe uma quantidade inteira de segundos no campo **Nova janela** e use **Aplicar janela**. A API recalcula imediatamente os indicadores usando esse período. Ao salvar, a janela atual é gravada no arquivo binário; ao restaurar, ela é reaplicada automaticamente.

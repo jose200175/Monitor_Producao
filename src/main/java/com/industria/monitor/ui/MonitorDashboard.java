@@ -49,6 +49,9 @@ import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 
 import com.industria.monitor.client.MonitorApiClient;
+import com.industria.monitor.configuracao.ConfiguracaoMaquina;
+import com.industria.monitor.configuracao.ConfiguracaoMonitoramento;
+import com.industria.monitor.configuracao.GerenciadorConfiguracoes;
 import com.industria.monitor.dto.alerta.AlertaResponseDTO;
 import com.industria.monitor.dto.leitura.LeituraRequestDTO;
 import com.industria.monitor.dto.leitura.LeituraResponseDTO;
@@ -56,6 +59,10 @@ import com.industria.monitor.dto.maquina.IndicadorProducaoResponseDTO;
 import com.industria.monitor.dto.maquina.MaquinaRequestDTO;
 import com.industria.monitor.dto.maquina.MaquinaResponseDTO;
 import com.industria.monitor.exportacao.ExportadorCsv;
+import com.industria.monitor.importacao.ImportadorCsv;
+import com.industria.monitor.importacao.LinhaRejeitada;
+import com.industria.monitor.importacao.ResultadoImportacao;
+import com.industria.monitor.model.Maquina;
 import com.industria.monitor.model.enums.AcaoAlerta;
 import com.industria.monitor.model.enums.EstadoAlerta;
 import com.industria.monitor.model.enums.StatusProducao;
@@ -82,6 +89,7 @@ public class MonitorDashboard extends JFrame {
 	private final DefaultTableModel machineModel = tableModel("ID", "Máquina", "Unidade", "Limite mínimo", "Intervalo (s)", "Situação");
 	private final DefaultTableModel alertModel = tableModel("ID", "Máquina", "Regra", "Estado", "Criado em");
 	private final DefaultTableModel historyModel = tableModel("Chave do evento", "Início do intervalo", "Fim do intervalo", "Quantidade", "Unidade", "Recebido em");
+	private final DefaultTableModel rejectedImportModel = tableModel("Linha", "Conteúdo", "Motivo");
 	private final List<JButton> navigationButtons = new ArrayList<>();
 	private final JTable overviewTable = createTable(overviewModel, 4);
 	private final JTable machineTable = createTable(machineModel, 5);
@@ -106,9 +114,16 @@ public class MonitorDashboard extends JFrame {
 	private final JButton exportIndicatorsButton = new JButton("Exportar indicadores CSV");
 	private final JButton simulationButton = new JButton("Iniciar simulação");
 	private final JButton generateDatasetButton = new JButton("Gerar CSV com 100 leituras");
+	private final JButton importCsvButton = new JButton("Importar leituras CSV");
+	private final JButton saveConfigButton = new JButton("Salvar configurações");
+	private final JButton loadConfigButton = new JButton("Restaurar configurações");
+	private final JButton applyWindowButton = new JButton("Aplicar janela");
+	private final JTextField windowField = formField("300");
 	private final JLabel simulationStatus = new JLabel("Simulação parada");
 	private final JLabel datasetStatus = new JLabel("Dataset ainda não gerado");
 	private final JLabel historyChartTitle = sectionTitle("Quantidade por intervalo");
+	private final JLabel overviewWindow = new JLabel("JANELA MÓVEL  •  5 MIN");
+	private final JLabel overviewChartTitle = sectionTitle("Produção x limite mínimo — janela de 5 minutos");
 	private boolean preparandoSimulacao;
 	private boolean atualizandoOpcoesDeMaquinas;
 	private List<MaquinaResponseDTO> machines = List.of();
@@ -139,6 +154,10 @@ public class MonitorDashboard extends JFrame {
 		generateDatasetButton.addActionListener(event -> gerarDataset());
 		exportReadingsButton.addActionListener(event -> exportarLeituras());
 		exportIndicatorsButton.addActionListener(event -> exportarIndicadores());
+		importCsvButton.addActionListener(event -> importarLeiturasCsv());
+		saveConfigButton.addActionListener(event -> salvarConfiguracoes());
+		loadConfigButton.addActionListener(event -> restaurarConfiguracoes());
+		applyWindowButton.addActionListener(event -> aplicarJanelaIndicadores());
 		historyMachine.addActionListener(event -> {
 			if (!atualizandoOpcoesDeMaquinas) {
 				atualizarBotaoExportarLeituras();
@@ -156,6 +175,7 @@ public class MonitorDashboard extends JFrame {
 		});
 		new Timer(10000, event -> atualizarPainel()).start();
 		atualizarPainel();
+		carregarJanelaIndicadores();
 	}
 
 	private JPanel buildSidebar() {
@@ -193,6 +213,8 @@ public class MonitorDashboard extends JFrame {
 		navigation.add(navButton("  Alertas", "alerts", false));
 		navigation.add(navButton("  Histórico", "history", false));
 		navigation.add(navButton("  Simulação", "simulation", false));
+		navigation.add(navButton("  Importação CSV", "import", false));
+		navigation.add(navButton("  Configurações", "config", false));
 
 		JPanel sideContent = new JPanel(new BorderLayout());
 		sideContent.setOpaque(false);
@@ -262,6 +284,8 @@ public class MonitorDashboard extends JFrame {
 		pages.add(buildAlertsPage(), "alerts");
 		pages.add(buildHistoryPage(), "history");
 		pages.add(buildSimulationPage(), "simulation");
+		pages.add(buildImportPage(), "import");
+		pages.add(buildConfigPage(), "config");
 		content.add(pages, BorderLayout.CENTER);
 		return content;
 	}
@@ -308,21 +332,20 @@ public class MonitorDashboard extends JFrame {
 		JPanel cardHeader = new JPanel(new BorderLayout());
 		cardHeader.setOpaque(false);
 		cardHeader.add(sectionTitle("Acompanhamento ao vivo"), BorderLayout.WEST);
-		JLabel window = new JLabel("JANELA MÓVEL  •  5 MIN");
-		window.setForeground(BLUE);
-		window.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 10));
+		overviewWindow.setForeground(BLUE);
+		overviewWindow.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 10));
 		styleButton(exportIndicatorsButton, false);
 		exportIndicatorsButton.setEnabled(false);
 		JPanel cardActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
 		cardActions.setOpaque(false);
-		cardActions.add(window);
+		cardActions.add(overviewWindow);
 		cardActions.add(exportIndicatorsButton);
 		cardHeader.add(cardActions, BorderLayout.EAST);
 		monitorCard.add(cardHeader, BorderLayout.NORTH);
 
 		JPanel chartCard = cardPanel();
 		chartCard.setLayout(new BorderLayout(0, 8));
-		chartCard.add(sectionTitle("Produção x limite mínimo — janela de 5 minutos"), BorderLayout.NORTH);
+		chartCard.add(overviewChartTitle, BorderLayout.NORTH);
 		JScrollPane chartScroll = new JScrollPane(
 				graficoIndicadores,
 				JScrollPane.VERTICAL_SCROLLBAR_NEVER,
@@ -341,6 +364,80 @@ public class MonitorDashboard extends JFrame {
 		monitorCard.add(overviewSplit, BorderLayout.CENTER);
 		page.add(stats, BorderLayout.NORTH);
 		page.add(monitorCard, BorderLayout.CENTER);
+		return page;
+	}
+
+	private JPanel buildImportPage() {
+		JPanel page = cardPanel();
+		page.setLayout(new BorderLayout(0, 14));
+		page.add(sectionTitle("Importação de leituras CSV"), BorderLayout.NORTH);
+
+		JLabel orientacao = new JLabel("<html>Selecione um arquivo CSV com as colunas "
+				+ "<b>maquina_id, inicio_intervalo, fim_intervalo, quantidade, unidade</b>. "
+				+ "<b>chave_evento</b> é opcional.</html>");
+		orientacao.setForeground(MUTED);
+		orientacao.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
+
+		JPanel topo = new JPanel(new BorderLayout(12, 0));
+		topo.setOpaque(false);
+		topo.add(orientacao, BorderLayout.CENTER);
+		styleButton(importCsvButton, true);
+		topo.add(importCsvButton, BorderLayout.EAST);
+
+		JTable rejeitadas = createTable(rejectedImportModel, -1);
+		rejeitadas.getColumnModel().getColumn(1).setPreferredWidth(360);
+		rejeitadas.getColumnModel().getColumn(2).setPreferredWidth(420);
+
+		JPanel conteudo = new JPanel(new BorderLayout(0, 12));
+		conteudo.setOpaque(false);
+		conteudo.add(topo, BorderLayout.NORTH);
+		conteudo.add(tableScroll(rejeitadas), BorderLayout.CENTER);
+		JLabel legenda = new JLabel("Linhas válidas são enviadas à API; linhas rejeitadas são listadas acima.");
+		legenda.setForeground(MUTED);
+		page.add(conteudo, BorderLayout.CENTER);
+		page.add(legenda, BorderLayout.SOUTH);
+		return page;
+	}
+
+	private JPanel buildConfigPage() {
+		JPanel page = cardPanel();
+		page.setLayout(new BorderLayout(0, 14));
+		page.add(sectionTitle("Configurações persistidas"), BorderLayout.NORTH);
+
+		JPanel informacoes = new JPanel(new GridLayout(0, 1, 0, 10));
+		informacoes.setOpaque(false);
+		JLabel arquivo = new JLabel("Arquivo binário: monitor-config.dat");
+		JLabel janela = new JLabel("Janela de indicadores (segundos)");
+		JLabel ausencia = new JLabel("Limite de ausência: 60 segundos");
+		JLabel maquinas = new JLabel("Persistidas por máquina: nome, unidade, limite mínimo e intervalo.");
+		for (JLabel item : new JLabel[] { arquivo, janela, ausencia, maquinas }) {
+			item.setForeground(NAVY);
+			item.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
+			informacoes.add(item);
+		}
+
+		JPanel janelaControle = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+		janelaControle.setOpaque(false);
+		windowField.setPreferredSize(new Dimension(100, 32));
+		styleButton(applyWindowButton, true);
+		janelaControle.add(new JLabel("Nova janela:"));
+		janelaControle.add(windowField);
+		janelaControle.add(new JLabel("segundos"));
+		janelaControle.add(applyWindowButton);
+
+		JPanel acoes = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+		acoes.setOpaque(false);
+		styleButton(saveConfigButton, true);
+		styleButton(loadConfigButton, false);
+		acoes.add(saveConfigButton);
+		acoes.add(loadConfigButton);
+
+		JPanel conteudo = new JPanel(new BorderLayout(0, 16));
+		conteudo.setOpaque(false);
+		conteudo.add(informacoes, BorderLayout.NORTH);
+		conteudo.add(janelaControle, BorderLayout.CENTER);
+		conteudo.add(acoes, BorderLayout.SOUTH);
+		page.add(conteudo, BorderLayout.CENTER);
 		return page;
 	}
 
@@ -557,12 +654,17 @@ public class MonitorDashboard extends JFrame {
 			for (MaquinaResponseDTO machine : loadedMachines) {
 				loadedIndicators.add(api.buscarIndicadores(machine.id()));
 			}
-			return new Snapshot(loadedMachines, loadedIndicators, api.listarAlertas());
+			return new Snapshot(
+					loadedMachines,
+					loadedIndicators,
+					api.listarAlertas(),
+					api.buscarJanelaIndicadoresSegundos());
 		}, snapshot -> {
 			refreshInProgress = false;
 			machines = snapshot.machines();
 			indicators = snapshot.indicators();
 			alerts = snapshot.alerts();
+			atualizarTextosJanela(snapshot.janelaIndicadoresSegundos());
 			graficoIndicadores.setDados(machines, indicators);
 			exportIndicatorsButton.setEnabled(!machines.isEmpty() && machines.size() == indicators.size());
 			popularTabelas();
@@ -580,6 +682,32 @@ public class MonitorDashboard extends JFrame {
 				exibirErro("Não foi possível atualizar o painel.", exception);
 			}
 		});
+	}
+
+	private void atualizarTextosJanela(int segundos) {
+		String descricaoCurta = formatarJanelaCurta(segundos);
+		String descricaoCompleta = formatarJanelaCompleta(segundos);
+		overviewWindow.setText("JANELA MÓVEL  •  " + descricaoCurta);
+		overviewChartTitle.setText("Produção x limite mínimo — janela de " + descricaoCompleta);
+		overviewModel.setColumnIdentifiers(new Object[] {
+				"Máquina", "Produção / " + descricaoCurta, "Limite", "Unidade", "Situação"
+		});
+	}
+
+	private String formatarJanelaCurta(int segundos) {
+		if (segundos % 60 == 0) {
+			long minutos = segundos / 60L;
+			return minutos + " MIN";
+		}
+		return segundos + " SEG";
+	}
+
+	private String formatarJanelaCompleta(int segundos) {
+		if (segundos % 60 == 0) {
+			long minutos = segundos / 60L;
+			return minutos + (minutos == 1 ? " minuto" : " minutos");
+		}
+		return segundos + " segundos";
 	}
 
 	private void popularTabelas() {
@@ -706,6 +834,175 @@ public class MonitorDashboard extends JFrame {
 		} else {
 			historyChartTitle.setText("Quantidade por intervalo");
 		}
+	}
+
+	private void importarLeiturasCsv() {
+		JFileChooser chooser = new JFileChooser();
+		chooser.setDialogTitle("Importar leituras CSV");
+		if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+			return;
+		}
+		Path origem = chooser.getSelectedFile().toPath();
+		importCsvButton.setEnabled(false);
+		runAsync(() -> {
+			Map<Long, Maquina> maquinasPorId = new java.util.LinkedHashMap<>();
+			for (MaquinaResponseDTO maquinaDto : machines) {
+				Maquina maquina = new Maquina();
+				maquina.setId(maquinaDto.id());
+				maquina.setNome(maquinaDto.nome());
+				maquina.setUnidade(maquinaDto.unidade());
+				maquina.setLimiteMin(maquinaDto.limiteMin());
+				maquina.setIntervaloSeg(maquinaDto.intervaloSeg());
+				maquinasPorId.put(maquinaDto.id(), maquina);
+			}
+			ResultadoImportacao resultado = ImportadorCsv.importar(origem, maquinasPorId);
+			List<LinhaRejeitada> rejeitadas = new ArrayList<>(resultado.linhasRejeitadas());
+			int importadas = 0;
+			for (com.industria.monitor.model.Leitura leitura : resultado.leiturasImportadas()) {
+				try {
+					api.cadastrarLeitura(new LeituraRequestDTO(
+							leitura.getMaquina().getId(),
+							leitura.getInicioIntervalo(),
+							leitura.getFimIntervalo(),
+							leitura.getQuantidade(),
+							leitura.getUnidade(),
+							leitura.getChaveEvento()));
+					importadas++;
+				} catch (Exception exception) {
+					rejeitadas.add(new LinhaRejeitada(
+							0, leitura.getChaveEvento(), "Não enviado à API: " + exception.getMessage()));
+				}
+			}
+			return new Object[] { importadas, rejeitadas };
+		}, valor -> {
+			importCsvButton.setEnabled(true);
+			Object[] dados = (Object[]) valor;
+			int importadas = (Integer) dados[0];
+			@SuppressWarnings("unchecked")
+			List<LinhaRejeitada> rejeitadas = (List<LinhaRejeitada>) dados[1];
+			rejectedImportModel.setRowCount(0);
+			for (LinhaRejeitada rejeitada : rejeitadas) {
+				rejectedImportModel.addRow(new Object[] {
+						rejeitada.numeroLinha() == 0 ? "API" : rejeitada.numeroLinha(),
+						rejeitada.conteudo(),
+						rejeitada.motivo()
+				});
+			}
+			JOptionPane.showMessageDialog(this,
+					importadas + " leitura(s) importada(s). "
+							+ rejeitadas.size() + " registro(s) rejeitado(s).",
+					"Importação concluída", JOptionPane.INFORMATION_MESSAGE);
+			atualizarPainel();
+		}, exception -> {
+			importCsvButton.setEnabled(true);
+			exibirErro("Não foi possível importar o arquivo CSV.", exception);
+		});
+	}
+
+	private void salvarConfiguracoes() {
+		JFileChooser chooser = new JFileChooser();
+		chooser.setDialogTitle("Salvar configurações binárias");
+		chooser.setSelectedFile(Path.of("monitor-config.dat").toFile());
+		if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+			return;
+		}
+		Path destino = chooser.getSelectedFile().toPath();
+		saveConfigButton.setEnabled(false);
+		runAsync(() -> {
+			List<ConfiguracaoMaquina> configuracoes = new ArrayList<>();
+			for (MaquinaResponseDTO maquina : machines) {
+				configuracoes.add(new ConfiguracaoMaquina(
+						maquina.id(),
+						maquina.nome(),
+						maquina.unidade(),
+						maquina.limiteMin(),
+						maquina.intervaloSeg()));
+			}
+			ConfiguracaoMonitoramento configuracao = new ConfiguracaoMonitoramento(
+					api.buscarJanelaIndicadoresSegundos(), 60, configuracoes);
+			GerenciadorConfiguracoes.gravar(destino, configuracao);
+			return destino;
+		}, arquivo -> {
+			saveConfigButton.setEnabled(true);
+			JOptionPane.showMessageDialog(this,
+					"Configurações gravadas em:\n" + arquivo,
+					"Configuração salva", JOptionPane.INFORMATION_MESSAGE);
+		}, exception -> {
+			saveConfigButton.setEnabled(true);
+			exibirErro("Não foi possível salvar as configurações.", exception);
+		});
+	}
+
+	private void restaurarConfiguracoes() {
+		JFileChooser chooser = new JFileChooser();
+		chooser.setDialogTitle("Restaurar configurações binárias");
+		if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+			return;
+		}
+		Path origem = chooser.getSelectedFile().toPath();
+		loadConfigButton.setEnabled(false);
+		runAsync(() -> GerenciadorConfiguracoes.recuperar(origem), configuracao -> {
+			loadConfigButton.setEnabled(true);
+			aplicarConfiguracaoRecuperada(configuracao);
+		}, exception -> {
+			loadConfigButton.setEnabled(true);
+			exibirErro("Não foi possível recuperar as configurações.", exception);
+		});
+	}
+
+	private void carregarJanelaIndicadores() {
+		runAsync(api::buscarJanelaIndicadoresSegundos, segundos -> {
+			windowField.setText(Integer.toString(segundos));
+			atualizarTextosJanela(segundos);
+		}, exception -> exibirErro("Não foi possível consultar a janela de indicadores.", exception));
+	}
+
+	private void aplicarJanelaIndicadores() {
+		try {
+			int segundos = Integer.parseInt(windowField.getText().trim());
+			if (segundos <= 0) {
+				throw new IllegalArgumentException("A janela deve ser maior que zero.");
+			}
+			applyWindowButton.setEnabled(false);
+			runAsync(
+					() -> api.alterarJanelaIndicadoresSegundos(segundos),
+					aplicada -> {
+						applyWindowButton.setEnabled(true);
+						windowField.setText(Integer.toString(aplicada));
+						atualizarTextosJanela(aplicada);
+						JOptionPane.showMessageDialog(this,
+								"Janela de indicadores alterada para " + aplicada + " segundos.",
+								"Configuração aplicada", JOptionPane.INFORMATION_MESSAGE);
+						atualizarPainel();
+					},
+					exception -> {
+						applyWindowButton.setEnabled(true);
+						exibirErro("Não foi possível alterar a janela de indicadores.", exception);
+					});
+		} catch (IllegalArgumentException exception) {
+			exibirErro("Informe uma janela válida em segundos.", exception);
+		}
+	}
+
+	private void aplicarConfiguracaoRecuperada(ConfiguracaoMonitoramento configuracao) {
+		runAsync(
+				() -> api.alterarJanelaIndicadoresSegundos(
+						configuracao.janelaIndicadoresSegundos()),
+				segundos -> {
+					windowField.setText(Integer.toString(segundos));
+					atualizarTextosJanela(segundos);
+					StringBuilder resumo = new StringBuilder();
+					resumo.append("Arquivo válido e janela aplicada.\n")
+							.append("Versão: ").append(ConfiguracaoMonitoramento.VERSAO_ATUAL).append("\n")
+							.append("Janela: ").append(segundos).append(" segundos\n")
+							.append("Ausência: ").append(configuracao.limiteAusenciaSegundos()).append(" segundos\n")
+							.append("Máquinas: ").append(configuracao.maquinas().size());
+					JOptionPane.showMessageDialog(this, resumo.toString(),
+							"Configuração recuperada", JOptionPane.INFORMATION_MESSAGE);
+					atualizarPainel();
+				},
+				exception -> exibirErro("O arquivo foi recuperado, mas a janela não pôde ser aplicada.",
+						exception));
 	}
 
 	private void exportarIndicadores() {
@@ -1010,7 +1307,8 @@ public class MonitorDashboard extends JFrame {
 	private record Snapshot(
 			List<MaquinaResponseDTO> machines,
 			List<IndicadorProducaoResponseDTO> indicators,
-			List<AlertaResponseDTO> alerts) {}
+			List<AlertaResponseDTO> alerts,
+			int janelaIndicadoresSegundos) {}
 
 	private static class StatusRenderer extends DefaultTableCellRenderer {
 		private final int statusColumn;
