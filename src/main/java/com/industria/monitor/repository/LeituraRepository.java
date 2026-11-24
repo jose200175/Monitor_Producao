@@ -11,6 +11,7 @@ public interface LeituraRepository extends JpaRepository<Leitura, Long>{
 
 	public Optional<List<Leitura>> findByMaquinaId(Long maquinaId);
 	boolean existsByChaveEvento(String chaveEvento);
+	boolean existsByChaveEventoAndIdNot(String chaveEvento, Long id);
 	List<Leitura> findByMaquinaIdAndFimIntervaloAfterAndInicioIntervaloBefore(
 			Long maquinaId, LocalDateTime inicioJanela, LocalDateTime fimJanela);
 	Optional<Leitura> findTopByMaquinaIdOrderByCriadoEmDesc(Long maquinaId);

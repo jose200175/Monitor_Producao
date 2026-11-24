@@ -35,6 +35,7 @@ public class AlertaController {
 	public ResponseEntity<AlertaResponseDTO> aplicarAcao(
 			@PathVariable Long alertaId,
 			@RequestBody @Valid AcaoAlertaRequestDTO dto) {
-		return ResponseEntity.ok(service.aplicarAcao(alertaId, dto.acao()));
+		return ResponseEntity.ok(service.aplicarAcao(
+				alertaId, dto.acao(), dto.codigoTrabalhador(), dto.observacoes()));
 	}
 }

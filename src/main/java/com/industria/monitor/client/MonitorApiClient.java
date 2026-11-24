@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.industria.monitor.dto.alerta.AlertaResponseDTO;
@@ -64,12 +66,29 @@ public class MonitorApiClient {
 		return objectMapper.readValue(enviar("POST", "maquinas", maquina), MaquinaResponseDTO.class);
 	}
 
+	public MaquinaResponseDTO atualizarMaquina(Long maquinaId, MaquinaRequestDTO maquina)
+			throws IOException, InterruptedException {
+		return objectMapper.readValue(
+				enviar("PUT", "maquinas/" + maquinaId, maquina), MaquinaResponseDTO.class);
+	}
+
 	public void cadastrarLeitura(LeituraRequestDTO leitura) throws IOException, InterruptedException {
 		enviar("POST", "leituras", leitura);
 	}
 
-	public void aplicarAcaoAlerta(Long alertaId, AcaoAlerta acao) throws IOException, InterruptedException {
-		enviar("PATCH", "alertas/" + alertaId, Map.of("acao", acao.name()));
+	public LeituraResponseDTO atualizarLeitura(Long leituraId, LeituraRequestDTO leitura)
+			throws IOException, InterruptedException {
+		return objectMapper.readValue(
+				enviar("PUT", "leituras/" + leituraId, leitura), LeituraResponseDTO.class);
+	}
+
+	public void aplicarAcaoAlerta(
+			Long alertaId, AcaoAlerta acao, String codigoTrabalhador, String observacoes)
+			throws IOException, InterruptedException {
+		enviar("PATCH", "alertas/" + alertaId, Map.of(
+				"acao", acao.name(),
+				"codigoTrabalhador", codigoTrabalhador,
+				"observacoes", observacoes == null ? "" : observacoes));
 	}
 
 	public int buscarJanelaIndicadoresSegundos() throws IOException, InterruptedException {
@@ -99,10 +118,26 @@ public class MonitorApiClient {
 
 		HttpResponse<byte[]> response = httpClient.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
 		if (response.statusCode() < 200 || response.statusCode() >= 300) {
-			String responseBody = new String(response.body(), java.nio.charset.StandardCharsets.UTF_8);
+			String responseBody = mensagemErro(response.body());
 			throw new IOException("API respondeu HTTP " + response.statusCode()
 					+ (responseBody.isBlank() ? "" : ": " + responseBody));
 		}
 		return response.body();
+	}
+
+	private String mensagemErro(byte[] corpo) {
+		String texto = new String(corpo, java.nio.charset.StandardCharsets.UTF_8);
+		try {
+			JsonNode erro = objectMapper.readTree(texto);
+			for (String campo : List.of("message", "detail", "error")) {
+				JsonNode valor = erro.get(campo);
+				if (valor != null && valor.isTextual() && !valor.asText().isBlank()) {
+					return valor.asText();
+				}
+			}
+		} catch (JsonProcessingException ignored) {
+			return texto;
+		}
+		return texto;
 	}
 }

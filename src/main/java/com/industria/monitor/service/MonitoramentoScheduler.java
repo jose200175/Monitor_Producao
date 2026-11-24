@@ -12,17 +12,23 @@ public class MonitoramentoScheduler {
 
 	private final MaquinaRepository maquinaRepository;
 	private final MonitoramentoAusenciaService ausenciaService;
+	private final LeituraService leituraService;
 
 	public MonitoramentoScheduler(
 			MaquinaRepository maquinaRepository,
-			MonitoramentoAusenciaService ausenciaService) {
+			MonitoramentoAusenciaService ausenciaService,
+			LeituraService leituraService) {
 		this.maquinaRepository = maquinaRepository;
 		this.ausenciaService = ausenciaService;
+		this.leituraService = leituraService;
 	}
 
 	@Scheduled(fixedDelay = 10000)
 	public void verificarAusenciaDeDados() {
 		LocalDateTime agora = LocalDateTime.now();
-		maquinaRepository.findAll().forEach(maquina -> ausenciaService.atualizarEstado(maquina, agora));
+		maquinaRepository.findAll().forEach(maquina -> {
+			ausenciaService.atualizarEstado(maquina, agora);
+			leituraService.verificarAlertasDeProducao(maquina.getId());
+		});
 	}
 }

@@ -52,7 +52,7 @@ Os resultados detalhados ficam em `target/surefire-reports`. Use Java 17 ou supe
 
 Na seção **Simulação** do cliente, **Iniciar simulação** cadastra (se necessário) três máquinas e envia leituras a cada 60 segundos para os cenários de produção normal e baixa. A máquina do cenário de ausência fica cadastrada sem receber leituras para permitir a detecção de ausência pela API. **Gerar CSV com 100 leituras** cria `dados/leituras_sinteticas.csv`, com 100 registros, intervalo, quantidade, unidade e chave do evento.
 
-Para instalações existentes usando o perfil `prod`, aplique uma vez o script `src/main/resources/db/migration/V2__chave_evento_leitura.sql` no banco antes de iniciar a nova versão. O perfil `dev` atualiza a estrutura automaticamente.
+Para instalações existentes usando o perfil `prod`, aplique os scripts de banco pendentes antes de iniciar a nova versão: `src/main/resources/db/migration/V2__chave_evento_leitura.sql` (se ainda não aplicado) e `src/main/resources/db/migration/V3__maintenance_workers_and_alerts.sql`. O perfil `dev` atualiza a estrutura automaticamente.
 
 ## Exportar dados
 
@@ -65,3 +65,17 @@ Na barra lateral, use **Importação CSV** para selecionar um arquivo de leitura
 Use **Configurações** para salvar ou restaurar o arquivo binário `monitor-config.dat`. O arquivo contém assinatura, versão, janela de indicadores, limite de ausência e os limites e intervalos das máquinas monitoradas. Se o cliente Swing já estiver aberto, feche-o e execute novamente `.\mvnw.cmd exec:java` para carregar a interface atualizada.
 
 Na página **Configurações**, informe uma quantidade inteira de segundos no campo **Nova janela** e use **Aplicar janela**. A API recalcula imediatamente os indicadores usando esse período. Ao salvar, a janela atual é gravada no arquivo binário; ao restaurar, ela é reaplicada automaticamente.
+
+## Edição, manutenção e alertas
+
+Os cabeçalhos das tabelas podem ser clicados para ordenar os registros. Em **Máquinas**, selecione uma máquina e use **Editar máquina** para ajustar limites, programar a data da manutenção e definir quantos dias antes deve surgir o alerta. O limite de superprodução é comparado com a produção acumulada na janela de indicadores. Na aba **Histórico**, selecione uma leitura e use **Editar leitura**. As edições exigem um código de trabalhador cadastrado.
+
+Antes de editar registros em `prod`, cadastre os trabalhadores na tabela `trabalhadores` (a aplicação valida o código informado contra esse cadastro). Exemplo:
+
+```sql
+INSERT INTO trabalhadores (codigo, nome) VALUES ('TRAB-001', 'Nome do trabalhador');
+```
+
+Reconhecer, resolver ou colocar um alerta em manutenção exige o código do responsável; resolver e colocar em manutenção também exige observações. Alertas novos geram uma janela de notificação no cliente Swing. A antecedência da manutenção é configurada por máquina.
+
+No perfil `dev`, a aplicação cadastra automaticamente o trabalhador `ADMIN-TESTE` para facilitar a execução local. Outros trabalhadores podem ser inseridos pela console H2 (`http://localhost:8080/h2-console`, JDBC URL `jdbc:h2:mem:monitor`, usuário `sa`, senha vazia) enquanto a API estiver em execução. Esse banco é em memória e os trabalhadores inseridos manualmente são perdidos ao reiniciar a API; o `ADMIN-TESTE` é recriado na inicialização. Esse cadastro automático não é habilitado em `prod`.

@@ -12,15 +12,19 @@ import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
@@ -40,6 +44,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
+import javax.swing.JTextArea;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
@@ -86,13 +91,18 @@ public class MonitorDashboard extends JFrame {
 	private final CardLayout pageLayout = new CardLayout();
 	private final JPanel pages = new JPanel(pageLayout);
 	private final DefaultTableModel overviewModel = tableModel("Máquina", "Produção / 5 min", "Limite", "Unidade", "Situação");
-	private final DefaultTableModel machineModel = tableModel("ID", "Máquina", "Unidade", "Limite mínimo", "Intervalo (s)", "Situação");
-	private final DefaultTableModel alertModel = tableModel("ID", "Máquina", "Regra", "Estado", "Criado em");
-	private final DefaultTableModel historyModel = tableModel("Chave do evento", "Início do intervalo", "Fim do intervalo", "Quantidade", "Unidade", "Recebido em");
+	private final DefaultTableModel machineModel = tableModel(
+			"ID", "Máquina", "Unidade", "Limite mínimo", "Intervalo (s)",
+			"Limite superprodução", "Manutenção", "Aviso (dias)", "Editado por", "Situação");
+	private final DefaultTableModel alertModel = tableModel(
+			"ID", "Máquina", "Regra", "Estado", "Criado em", "Responsável", "Observações");
+	private final DefaultTableModel historyModel = tableModel(
+			"ID", "Chave do evento", "Início do intervalo", "Fim do intervalo",
+			"Quantidade", "Unidade", "Recebido em", "Editado por");
 	private final DefaultTableModel rejectedImportModel = tableModel("Linha", "Conteúdo", "Motivo");
 	private final List<JButton> navigationButtons = new ArrayList<>();
 	private final JTable overviewTable = createTable(overviewModel, 4);
-	private final JTable machineTable = createTable(machineModel, 5);
+	private final JTable machineTable = createTable(machineModel, 9);
 	private final JTable alertTable = createTable(alertModel, 3);
 	private final JTable historyTable = createTable(historyModel, -1);
 	private final JComboBox<MaquinaResponseDTO> historyMachine = new JComboBox<>();
@@ -109,6 +119,9 @@ public class MonitorDashboard extends JFrame {
 	private final JButton addReadingButton = new JButton("＋  Registrar leitura");
 	private final JButton acknowledgeButton = new JButton("Reconhecer alerta");
 	private final JButton resolveButton = new JButton("Resolver alerta");
+	private final JButton maintenanceButton = new JButton("Colocar em manutenção");
+	private final JButton editMachineButton = new JButton("Editar máquina");
+	private final JButton editReadingButton = new JButton("Editar leitura");
 	private final JButton historyRefreshButton = new JButton("Consultar histórico");
 	private final JButton exportReadingsButton = new JButton("Exportar leituras CSV");
 	private final JButton exportIndicatorsButton = new JButton("Exportar indicadores CSV");
@@ -124,6 +137,7 @@ public class MonitorDashboard extends JFrame {
 	private final JLabel historyChartTitle = sectionTitle("Quantidade por intervalo");
 	private final JLabel overviewWindow = new JLabel("JANELA MÓVEL  •  5 MIN");
 	private final JLabel overviewChartTitle = sectionTitle("Produção x limite mínimo — janela de 5 minutos");
+	private final LocalDateTime iniciouEm = LocalDateTime.now();
 	private boolean preparandoSimulacao;
 	private boolean atualizandoOpcoesDeMaquinas;
 	private List<MaquinaResponseDTO> machines = List.of();
@@ -131,6 +145,8 @@ public class MonitorDashboard extends JFrame {
 	private List<IndicadorProducaoResponseDTO> indicators = List.of();
 	private boolean connectionErrorShown;
 	private boolean refreshInProgress;
+	private boolean alertSnapshotLoaded;
+	private final Set<Long> knownAlertIds = new HashSet<>();
 
 	public MonitorDashboard(MonitorApiClient api) {
 		this.api = api;
@@ -150,6 +166,10 @@ public class MonitorDashboard extends JFrame {
 		addReadingButton.addActionListener(event -> abrirRegistroLeitura());
 		acknowledgeButton.addActionListener(event -> executarAcaoAlerta(AcaoAlerta.RECONHECER));
 		resolveButton.addActionListener(event -> executarAcaoAlerta(AcaoAlerta.RESOLVER));
+		maintenanceButton.addActionListener(
+				event -> executarAcaoAlerta(AcaoAlerta.COLOCAR_EM_MANUTENCAO));
+		editMachineButton.addActionListener(event -> editarMaquinaSelecionada());
+		editReadingButton.addActionListener(event -> editarLeituraSelecionada());
 		simulationButton.addActionListener(event -> alternarSimulacao());
 		generateDatasetButton.addActionListener(event -> gerarDataset());
 		exportReadingsButton.addActionListener(event -> exportarLeituras());
@@ -164,9 +184,12 @@ public class MonitorDashboard extends JFrame {
 				graficoHistorico.setLeituras(List.of());
 				historyModel.setRowCount(0);
 				atualizarTituloGraficoHistorico();
+				carregarHistorico();
 			}
 		});
 		alertTable.getSelectionModel().addListSelectionListener(event -> atualizarBotoesAlerta());
+		machineTable.getSelectionModel().addListSelectionListener(event -> atualizarBotaoEditarMaquina());
+		historyTable.getSelectionModel().addListSelectionListener(event -> atualizarBotaoEditarLeitura());
 		addWindowListener(new WindowAdapter() {
 			@Override
 			public void windowClosing(WindowEvent event) {
@@ -497,6 +520,12 @@ public class MonitorDashboard extends JFrame {
 		cardHeader.add(hint, BorderLayout.EAST);
 		page.add(cardHeader, BorderLayout.NORTH);
 		page.add(tableScroll(machineTable), BorderLayout.CENTER);
+		styleButton(editMachineButton, false);
+		editMachineButton.setEnabled(false);
+		JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+		actions.setOpaque(false);
+		actions.add(editMachineButton);
+		page.add(actions, BorderLayout.SOUTH);
 		return page;
 	}
 
@@ -517,9 +546,12 @@ public class MonitorDashboard extends JFrame {
 		actions.setOpaque(false);
 		styleButton(acknowledgeButton, false);
 		styleButton(resolveButton, true);
+		styleButton(maintenanceButton, false);
 		acknowledgeButton.setEnabled(false);
 		resolveButton.setEnabled(false);
+		maintenanceButton.setEnabled(false);
 		actions.add(acknowledgeButton);
+		actions.add(maintenanceButton);
 		actions.add(resolveButton);
 		page.add(actions, BorderLayout.SOUTH);
 		return page;
@@ -564,6 +596,12 @@ public class MonitorDashboard extends JFrame {
 		historySplit.setBorder(null);
 		historySplit.setOpaque(false);
 		page.add(historySplit, BorderLayout.CENTER);
+		styleButton(editReadingButton, false);
+		editReadingButton.setEnabled(false);
+		JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+		actions.setOpaque(false);
+		actions.add(editReadingButton);
+		page.add(actions, BorderLayout.SOUTH);
 		return page;
 	}
 
@@ -613,17 +651,39 @@ public class MonitorDashboard extends JFrame {
 		table.setGridColor(new Color(237, 241, 246));
 		table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
 		table.setFillsViewportHeight(true);
+		table.setAutoCreateRowSorter(true);
 		table.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
 		table.getTableHeader().setFont(new Font(Font.SANS_SERIF, Font.BOLD, 11));
 		table.getTableHeader().setForeground(MUTED);
 		table.getTableHeader().setBackground(new Color(248, 250, 252));
 		table.getTableHeader().setPreferredSize(new Dimension(0, 38));
 		table.setDefaultRenderer(Object.class, new StatusRenderer(statusColumn));
+		table.setDefaultRenderer(LocalDateTime.class, new DefaultTableCellRenderer() {
+			@Override
+			public Component getTableCellRendererComponent(
+					JTable target, Object value, boolean selected, boolean focused, int row, int column) {
+				super.getTableCellRendererComponent(target, value, selected, focused, row, column);
+				setText(value instanceof LocalDateTime dateTime ? dateTime.format(DATE_FORMAT) : "");
+				setBorder(BorderFactory.createEmptyBorder(0, 9, 0, 9));
+				return this;
+			}
+		});
 		return table;
 	}
 
 	private DefaultTableModel tableModel(String... columns) {
 		return new DefaultTableModel(columns, 0) {
+			@Override
+			public Class<?> getColumnClass(int columnIndex) {
+				for (int row = 0; row < getRowCount(); row++) {
+					Object value = getValueAt(row, columnIndex);
+					if (value != null) {
+						return value.getClass();
+					}
+				}
+				return Object.class;
+			}
+
 			@Override
 			public boolean isCellEditable(int row, int column) {
 				return false;
@@ -663,6 +723,7 @@ public class MonitorDashboard extends JFrame {
 			refreshInProgress = false;
 			machines = snapshot.machines();
 			indicators = snapshot.indicators();
+			notificarAlertasNovos(snapshot.alerts());
 			alerts = snapshot.alerts();
 			atualizarTextosJanela(snapshot.janelaIndicadoresSegundos());
 			graficoIndicadores.setDados(machines, indicators);
@@ -692,6 +753,37 @@ public class MonitorDashboard extends JFrame {
 		overviewModel.setColumnIdentifiers(new Object[] {
 				"Máquina", "Produção / " + descricaoCurta, "Limite", "Unidade", "Situação"
 		});
+	}
+
+	private void notificarAlertasNovos(List<AlertaResponseDTO> alertasRecebidos) {
+		List<AlertaResponseDTO> novos;
+		if (!alertSnapshotLoaded) {
+			alertasRecebidos.stream().map(AlertaResponseDTO::id).forEach(knownAlertIds::add);
+			alertSnapshotLoaded = true;
+			novos = alertasRecebidos.stream()
+					.filter(alerta -> alerta.criadoEm() != null && alerta.criadoEm().isAfter(iniciouEm))
+					.toList();
+		} else {
+			novos = alertasRecebidos.stream()
+					.filter(alerta -> knownAlertIds.add(alerta.id()))
+					.toList();
+		}
+		if (novos.isEmpty()) {
+			return;
+		}
+		String mensagem = novos.stream()
+				.map(alerta -> {
+					String maquina = machines.stream()
+							.filter(item -> item.id().equals(alerta.maquinaId()))
+							.map(MaquinaResponseDTO::nome)
+							.findFirst()
+							.orElse("Máquina " + alerta.maquinaId());
+					return maquina + ": " + ruleLabel(alerta.tipoRegra());
+				})
+				.collect(java.util.stream.Collectors.joining("\n"));
+		JOptionPane.showMessageDialog(this, mensagem,
+				novos.size() == 1 ? "Novo alerta" : "Novos alertas",
+				JOptionPane.WARNING_MESSAGE);
 	}
 
 	private String formatarJanelaCurta(int segundos) {
@@ -742,8 +834,8 @@ public class MonitorDashboard extends JFrame {
 			String status = statusLabel(indicator.status());
 			overviewModel.addRow(new Object[] {
 					machine.nome(),
-					indicator.quantidadeProduzida().stripTrailingZeros().toPlainString(),
-					indicator.limiteMinimo().stripTrailingZeros().toPlainString(),
+					indicator.quantidadeProduzida(),
+					indicator.limiteMinimo(),
 					indicator.unidade(),
 					status
 			});
@@ -751,8 +843,12 @@ public class MonitorDashboard extends JFrame {
 					machine.id(),
 					machine.nome(),
 					machine.unidade(),
-					machine.limiteMin().stripTrailingZeros().toPlainString(),
-					machine.intervaloSeg() == null ? "—" : machine.intervaloSeg().stripTrailingZeros().toPlainString(),
+					machine.limiteMin(),
+					machine.intervaloSeg(),
+					machine.limiteSuperproducao(),
+					machine.manutencaoProgramadaEm(),
+					machine.antecedenciaManutencaoDias(),
+					machine.codigoResponsavelEdicao(),
 					status
 			});
 		}
@@ -768,10 +864,13 @@ public class MonitorDashboard extends JFrame {
 					machine == null ? "Máquina " + alert.maquinaId() : machine.nome(),
 					ruleLabel(alert.tipoRegra()),
 					alertLabel(alert.estado()),
-					alert.criadoEm() == null ? "—" : alert.criadoEm().format(DATE_FORMAT)
+					alert.criadoEm(),
+					alert.codigoResponsavel() == null ? "" : alert.codigoResponsavel() + " — " + alert.nomeResponsavel(),
+					alert.observacoes()
 			});
 		}
 		atualizarBotoesAlerta();
+		atualizarBotaoEditarMaquina();
 	}
 
 	private void carregarHistorico() {
@@ -790,14 +889,17 @@ public class MonitorDashboard extends JFrame {
 					.sorted(java.util.Comparator.comparing(LeituraResponseDTO::inicioIntervalo).reversed())
 					.toList()) {
 				historyModel.addRow(new Object[] {
+						reading.id(),
 						reading.chaveEvento(),
-						reading.inicioIntervalo().format(DATE_FORMAT),
-						reading.fimIntervalo().format(DATE_FORMAT),
-						reading.quantidade().stripTrailingZeros().toPlainString(),
+						reading.inicioIntervalo(),
+						reading.fimIntervalo(),
+						reading.quantidade(),
 						reading.unidade(),
-						reading.criadoEm() == null ? "—" : reading.criadoEm().format(DATE_FORMAT)
+						reading.criadoEm(),
+						reading.codigoResponsavelEdicao()
 				});
 			}
+			atualizarBotaoEditarLeitura();
 		}, exception -> exibirErro("Não foi possível carregar o histórico de leituras.", exception));
 	}
 
@@ -1119,11 +1221,17 @@ public class MonitorDashboard extends JFrame {
 		JTextField unit = formField("Ex.: peças/min");
 		JTextField minimum = formField("Ex.: 25");
 		JTextField interval = formField("60");
+		JTextField maximum = formField("Opcional");
+		JTextField maintenanceDate = formField("AAAA-MM-DD (opcional)");
+		JTextField maintenanceLead = formField("7");
 		JPanel form = formPanel(
 				"Nome da máquina", name,
 				"Unidade de produção", unit,
 				"Limite mínimo", minimum,
-				"Intervalo de leitura (segundos)", interval);
+				"Intervalo de leitura (segundos)", interval,
+				"Limite de superprodução (opcional)", maximum,
+				"Data da manutenção programada (AAAA-MM-DD, opcional)", maintenanceDate,
+				"Antecedência do alerta de manutenção (dias)", maintenanceLead);
 
 		if (JOptionPane.showConfirmDialog(this, form, "Cadastrar máquina",
 				JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) {
@@ -1136,7 +1244,11 @@ public class MonitorDashboard extends JFrame {
 					machineName,
 					machineUnit,
 					new java.math.BigDecimal(required(minimum.getText(), "Informe o limite mínimo.").replace(',', '.')),
-					new java.math.BigDecimal(required(interval.getText(), "Informe o intervalo.").replace(',', '.')));
+					new java.math.BigDecimal(required(interval.getText(), "Informe o intervalo.").replace(',', '.')),
+					decimalOpcional(maximum.getText()),
+					dataOpcional(maintenanceDate.getText()),
+					Integer.parseInt(required(maintenanceLead.getText(),
+							"Informe a antecedência do alerta de manutenção.")));
 			runAsync(() -> {
 				api.cadastrarMaquina(request);
 				return null;
@@ -1148,6 +1260,119 @@ public class MonitorDashboard extends JFrame {
 		} catch (IllegalArgumentException exception) {
 			exibirErro("Confira os valores informados.", exception);
 		}
+	}
+
+	private void editarMaquinaSelecionada() {
+		int selectedRow = machineTable.getSelectedRow();
+		if (selectedRow < 0) {
+			return;
+		}
+		int modelRow = machineTable.convertRowIndexToModel(selectedRow);
+		Long machineId = ((Number) machineModel.getValueAt(modelRow, 0)).longValue();
+		MaquinaResponseDTO maquina = machines.stream()
+				.filter(item -> item.id().equals(machineId))
+				.findFirst()
+				.orElse(null);
+		if (maquina == null) {
+			exibirErro("Atualize a lista antes de editar a máquina.", null);
+			return;
+		}
+
+		JTextField name = formField(maquina.nome());
+		JTextField unit = formField(maquina.unidade());
+		JTextField minimum = formField(maquina.limiteMin().toPlainString());
+		JTextField interval = formField(maquina.intervaloSeg().toPlainString());
+		JTextField maximum = formField(maquina.limiteSuperproducao() == null
+				? "" : maquina.limiteSuperproducao().toPlainString());
+		JTextField maintenanceDate = formField(maquina.manutencaoProgramadaEm() == null
+				? "" : maquina.manutencaoProgramadaEm().toString());
+		JTextField maintenanceLead = formField(Integer.toString(maquina.antecedenciaManutencaoDias()));
+		JTextField workerCode = formField("Código cadastrado do trabalhador");
+		JPanel form = formPanel(
+				"Nome", name,
+				"Unidade", unit,
+				"Limite mínimo", minimum,
+				"Intervalo de leitura (segundos)", interval,
+				"Limite de superprodução (opcional)", maximum,
+				"Data da manutenção programada (AAAA-MM-DD, opcional)", maintenanceDate,
+				"Antecedência do alerta (dias)", maintenanceLead,
+				"Código do responsável pela edição", workerCode);
+
+		if (JOptionPane.showConfirmDialog(this, form, "Editar máquina",
+				JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) {
+			return;
+		}
+		try {
+			MaquinaRequestDTO request = new MaquinaRequestDTO(
+					required(name.getText(), "Informe o nome da máquina."),
+					required(unit.getText(), "Informe a unidade."),
+					new BigDecimal(required(minimum.getText(), "Informe o limite mínimo.").replace(',', '.')),
+					new BigDecimal(required(interval.getText(), "Informe o intervalo.").replace(',', '.')),
+					decimalOpcional(maximum.getText()),
+					dataOpcional(maintenanceDate.getText()),
+					Integer.parseInt(required(maintenanceLead.getText(),
+							"Informe a antecedência do alerta.")),
+					required(workerCode.getText(), "Informe o código do responsável."));
+			runAsync(() -> api.atualizarMaquina(machineId, request), ignored -> atualizarPainel(),
+					exception -> exibirErro("Não foi possível editar a máquina.", exception));
+		} catch (IllegalArgumentException exception) {
+			exibirErro("Confira os dados da máquina.", exception);
+		}
+	}
+
+	private void editarLeituraSelecionada() {
+		int selectedRow = historyTable.getSelectedRow();
+		if (selectedRow < 0 || !(historyMachine.getSelectedItem() instanceof MaquinaResponseDTO maquina)) {
+			return;
+		}
+		int modelRow = historyTable.convertRowIndexToModel(selectedRow);
+		Long readingId = ((Number) historyModel.getValueAt(modelRow, 0)).longValue();
+		String eventKey = Objects.toString(historyModel.getValueAt(modelRow, 1), "");
+		LocalDateTime startValue = (LocalDateTime) historyModel.getValueAt(modelRow, 2);
+		LocalDateTime endValue = (LocalDateTime) historyModel.getValueAt(modelRow, 3);
+		BigDecimal quantityValue = (BigDecimal) historyModel.getValueAt(modelRow, 4);
+		String unitValue = Objects.toString(historyModel.getValueAt(modelRow, 5), "");
+
+		JTextField quantity = formField(quantityValue.toPlainString());
+		JTextField start = formField(startValue.format(REQUEST_FORMAT));
+		JTextField end = formField(endValue.format(REQUEST_FORMAT));
+		JTextField unit = formField(unitValue);
+		JTextField workerCode = formField("Código cadastrado do trabalhador");
+		JPanel form = formPanel(
+				"Máquina", formField(maquina.nome()),
+				"Quantidade", quantity,
+				"Início do intervalo (AAAA-MM-DDTHH:MM:SS)", start,
+				"Fim do intervalo (AAAA-MM-DDTHH:MM:SS)", end,
+				"Unidade", unit,
+				"Código do responsável pela edição", workerCode);
+		if (JOptionPane.showConfirmDialog(this, form, "Editar leitura",
+				JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) {
+			return;
+		}
+		try {
+			LeituraRequestDTO request = new LeituraRequestDTO(
+					maquina.id(),
+					LocalDateTime.parse(required(start.getText(), "Informe o início."), REQUEST_FORMAT),
+					LocalDateTime.parse(required(end.getText(), "Informe o fim."), REQUEST_FORMAT),
+					new BigDecimal(required(quantity.getText(), "Informe a quantidade.").replace(',', '.')),
+					required(unit.getText(), "Informe a unidade."),
+					eventKey,
+					required(workerCode.getText(), "Informe o código do responsável."));
+			runAsync(() -> api.atualizarLeitura(readingId, request), ignored -> carregarHistorico(),
+					exception -> exibirErro("Não foi possível editar a leitura.", exception));
+		} catch (IllegalArgumentException exception) {
+			exibirErro("Confira os dados da leitura.", exception);
+		}
+	}
+
+	private BigDecimal decimalOpcional(String value) {
+		String normalized = value == null ? "" : value.trim();
+		return normalized.isEmpty() ? null : new BigDecimal(normalized.replace(',', '.'));
+	}
+
+	private LocalDate dataOpcional(String value) {
+		String normalized = value == null ? "" : value.trim();
+		return normalized.isEmpty() ? null : LocalDate.parse(normalized);
 	}
 
 	private void abrirRegistroLeitura() {
@@ -1232,11 +1457,44 @@ public class MonitorDashboard extends JFrame {
 			return;
 		}
 		AlertaResponseDTO alert = alerts.get(alertTable.convertRowIndexToModel(selectedRow));
+		JTextField workerCode = formField("Código cadastrado do trabalhador");
+		JTextArea observations = new JTextArea(4, 24);
+		observations.setLineWrap(true);
+		observations.setWrapStyleWord(true);
+		Object[] campos = action == AcaoAlerta.RECONHECER
+				? new Object[] { "Código do trabalhador", workerCode }
+				: new Object[] {
+						"Código do trabalhador", workerCode,
+						"Observações da intervenção", new JScrollPane(observations)
+				};
+		if (JOptionPane.showConfirmDialog(
+				this, formPanel(campos), tituloAcaoAlerta(action),
+				JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) {
+			return;
+		}
+		String codigo;
+		String textoObservacoes;
+		try {
+			codigo = required(workerCode.getText(), "Informe o código do trabalhador.");
+			textoObservacoes = action == AcaoAlerta.RECONHECER
+					? "" : required(observations.getText(), "Informe as observações da intervenção.");
+		} catch (IllegalArgumentException exception) {
+			exibirErro("Dados incompletos para a ação.", exception);
+			return;
+		}
 		runAsync(() -> {
-			api.aplicarAcaoAlerta(alert.id(), action);
+			api.aplicarAcaoAlerta(alert.id(), action, codigo, textoObservacoes);
 			return null;
 		}, ignored -> atualizarPainel(),
 				exception -> exibirErro("Não foi possível atualizar o alerta.", exception));
+	}
+
+	private String tituloAcaoAlerta(AcaoAlerta action) {
+		return switch (action) {
+			case RECONHECER -> "Reconhecer alerta";
+			case COLOCAR_EM_MANUTENCAO -> "Colocar máquina em manutenção";
+			case RESOLVER -> "Resolver alerta";
+		};
 	}
 
 	private void atualizarBotoesAlerta() {
@@ -1245,6 +1503,17 @@ public class MonitorDashboard extends JFrame {
 		AlertaResponseDTO alert = selected ? alerts.get(alertTable.convertRowIndexToModel(row)) : null;
 		acknowledgeButton.setEnabled(alert != null && alert.estado() == EstadoAlerta.ABERTO);
 		resolveButton.setEnabled(alert != null && alert.estado() != EstadoAlerta.RESOLVIDO);
+		maintenanceButton.setEnabled(alert != null
+				&& alert.estado() != EstadoAlerta.RESOLVIDO
+				&& alert.estado() != EstadoAlerta.EM_MANUTENCAO);
+	}
+
+	private void atualizarBotaoEditarMaquina() {
+		editMachineButton.setEnabled(machineTable.getSelectedRow() >= 0);
+	}
+
+	private void atualizarBotaoEditarLeitura() {
+		editReadingButton.setEnabled(historyTable.getSelectedRow() >= 0);
 	}
 
 	private <T> void runAsync(Callable<T> operation, Consumer<T> onSuccess, Consumer<Exception> onFailure) {
@@ -1293,6 +1562,7 @@ public class MonitorDashboard extends JFrame {
 		return switch (status) {
 			case ABERTO -> "ABERTO";
 			case RECONHECIDO -> "RECONHECIDO";
+			case EM_MANUTENCAO -> "EM MANUTENÇÃO";
 			case RESOLVIDO -> "RESOLVIDO";
 		};
 	}
@@ -1301,6 +1571,8 @@ public class MonitorDashboard extends JFrame {
 		return switch (rule) {
 			case LIMITE_MINIMO -> "Baixa produção";
 			case AUSENCIA_DADOS -> "Sem dados";
+			case MANUTENCAO_PROGRAMADA -> "Manutenção programada";
+			case SUPERPRODUCAO -> "Superprodução";
 		};
 	}
 
@@ -1327,7 +1599,8 @@ public class MonitorDashboard extends JFrame {
 				String text = value.toString();
 				if (text.contains("NORMAL") || text.equals("RESOLVIDO")) {
 					setForeground(new Color(12, 132, 91));
-				} else if (text.contains("BAIXA") || text.contains("ABERTO")) {
+				} else if (text.contains("BAIXA") || text.contains("ABERTO")
+						|| text.contains("MANUTENÇÃO")) {
 					setForeground(new Color(190, 92, 12));
 				} else if (text.contains("SEM DADOS") || text.contains("RECONHECIDO")) {
 					setForeground(new Color(183, 57, 68));

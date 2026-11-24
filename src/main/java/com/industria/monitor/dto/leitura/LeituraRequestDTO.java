@@ -9,14 +9,25 @@ public record LeituraRequestDTO(
 	    LocalDateTime fimIntervalo,
 	    BigDecimal quantidade,
 	    String unidade,
-	    String chaveEvento
+	    String chaveEvento,
+	    String codigoResponsavelEdicao
 ) {
 	public LeituraRequestDTO(
 			Long maquinaId,
 			LocalDateTime inicioIntervalo,
 			LocalDateTime fimIntervalo,
 			BigDecimal quantidade,
+			String unidade,
+			String chaveEvento) {
+		this(maquinaId, inicioIntervalo, fimIntervalo, quantidade, unidade, chaveEvento, null);
+	}
+
+	public LeituraRequestDTO(
+			Long maquinaId,
+			LocalDateTime inicioIntervalo,
+			LocalDateTime fimIntervalo,
+			BigDecimal quantidade,
 			String unidade) {
-		this(maquinaId, inicioIntervalo, fimIntervalo, quantidade, unidade, null);
+		this(maquinaId, inicioIntervalo, fimIntervalo, quantidade, unidade, null, null);
 	}
 }

@@ -21,6 +21,10 @@ public class Leitura implements Serializable {
 	@ManyToOne
 	@JoinColumn( name = "maquina_id")
 	private Maquina maquina;
+
+	@ManyToOne
+	@JoinColumn(name = "responsavel_edicao_id")
+	private Trabalhador responsavelEdicao;
 	
 	@Column(name = "inicio_intervalo", nullable = false)
     private LocalDateTime inicioIntervalo;
@@ -60,6 +64,14 @@ public class Leitura implements Serializable {
 
 	public void setMaquina(Maquina maquina) {
 		this.maquina = maquina;
+	}
+
+	public Trabalhador getResponsavelEdicao() {
+		return responsavelEdicao;
+	}
+
+	public void setResponsavelEdicao(Trabalhador responsavelEdicao) {
+		this.responsavelEdicao = responsavelEdicao;
 	}
 
 	public LocalDateTime getInicioIntervalo() {

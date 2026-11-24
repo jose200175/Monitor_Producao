@@ -33,8 +33,6 @@ public class MonitoramentoAusenciaService {
 
 		if (semDados) {
 			alertaService.abrirSeNecessario(maquina, TipoRegra.AUSENCIA_DADOS);
-		} else {
-			alertaService.resolverAtivos(maquina, TipoRegra.AUSENCIA_DADOS);
 		}
 		return semDados;
 	}

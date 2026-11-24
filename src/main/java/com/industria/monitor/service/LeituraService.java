@@ -18,10 +18,12 @@ import com.industria.monitor.dto.maquina.IndicadorProducaoResponseDTO;
 import com.industria.monitor.configuracao.ConfiguracaoMonitoramentoRuntime;
 import com.industria.monitor.model.Leitura;
 import com.industria.monitor.model.Maquina;
+import com.industria.monitor.model.Trabalhador;
 import com.industria.monitor.model.enums.StatusProducao;
 import com.industria.monitor.model.enums.TipoRegra;
 import com.industria.monitor.repository.LeituraRepository;
 import com.industria.monitor.repository.MaquinaRepository;
+import com.industria.monitor.repository.TrabalhadorRepository;
 
 import jakarta.validation.Valid;
 
@@ -33,30 +35,26 @@ public class LeituraService {
 	private final AlertaService alertaService;
 	private final MonitoramentoAusenciaService ausenciaService;
 	private final ConfiguracaoMonitoramentoRuntime configuracao;
+	private final TrabalhadorRepository trabalhadorRepository;
 
 	public LeituraService(
 			MaquinaRepository maquinaRepository,
 			LeituraRepository repository,
 			AlertaService alertaService,
 			MonitoramentoAusenciaService ausenciaService,
-			ConfiguracaoMonitoramentoRuntime configuracao) {
+			ConfiguracaoMonitoramentoRuntime configuracao,
+			TrabalhadorRepository trabalhadorRepository) {
 		this.repository = repository;
 		this.maquinaRepository = maquinaRepository;
 		this.alertaService = alertaService;
 		this.ausenciaService = ausenciaService;
 		this.configuracao = configuracao;
+		this.trabalhadorRepository = trabalhadorRepository;
 	}
 
 	@Transactional
 	public LeituraResponseDTO cadastrarLeitura(@Valid LeituraRequestDTO dto) {
-		if (dto.maquinaId() == null || dto.inicioIntervalo() == null || dto.fimIntervalo() == null
-				|| !dto.inicioIntervalo().isBefore(dto.fimIntervalo())
-				|| dto.quantidade() == null || dto.quantidade().signum() < 0
-				|| dto.unidade() == null || dto.unidade().isBlank()
-				|| (dto.chaveEvento() != null
-						&& (dto.chaveEvento().isBlank() || dto.chaveEvento().length() > 64))) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Dados da leitura inválidos");
-		}
+		validarDados(dto);
 
 		boolean existe = repository.findByMaquinaId(dto.maquinaId())
 				.orElse(List.of())
@@ -85,8 +83,58 @@ public class LeituraService {
 		Leitura leituraSalva = repository.save(leitura);
 		LocalDateTime agora = LocalDateTime.now();
 		ausenciaService.atualizarEstado(maquina, agora);
-		atualizarAlertaBaixaProducao(maquina, calcularQuantidade(maquina, agora));
+		atualizarAlertasDeProducao(maquina, calcularQuantidade(maquina, agora));
 		return LeituraResponseDTO.fromEntity(leituraSalva);
+	}
+
+	@Transactional
+	public LeituraResponseDTO atualizar(Long leituraId, @Valid LeituraRequestDTO dto) {
+		validarDados(dto);
+		if (dto.codigoResponsavelEdicao() == null || dto.codigoResponsavelEdicao().isBlank()) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"Informe o código do trabalhador responsável pela edição");
+		}
+		Leitura leitura = repository.findById(leituraId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Leitura não encontrada"));
+		boolean periodoDuplicado = repository.findByMaquinaId(dto.maquinaId())
+				.orElse(List.of())
+				.stream()
+				.anyMatch(outra -> !outra.getId().equals(leituraId)
+						&& outra.getInicioIntervalo().equals(dto.inicioIntervalo())
+						&& outra.getFimIntervalo().equals(dto.fimIntervalo()));
+		if (periodoDuplicado) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT,
+					"Já existe uma leitura para essa máquina nesse período");
+		}
+		String chaveEvento = dto.chaveEvento() == null ? leitura.getChaveEvento() : dto.chaveEvento();
+		if (repository.existsByChaveEventoAndIdNot(chaveEvento, leituraId)) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "Chave de evento já utilizada");
+		}
+
+		Maquina maquina = maquinaRepository.findById(dto.maquinaId())
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Máquina não encontrada"));
+		Trabalhador responsavel = trabalhadorRepository.findByCodigo(dto.codigoResponsavelEdicao().trim())
+				.orElseThrow(() -> new ResponseStatusException(
+						HttpStatus.BAD_REQUEST, "Código de trabalhador não cadastrado"));
+		leitura.setMaquina(maquina);
+		leitura.setInicioIntervalo(dto.inicioIntervalo());
+		leitura.setFimIntervalo(dto.fimIntervalo());
+		leitura.setQuantidade(dto.quantidade());
+		leitura.setUnidade(dto.unidade());
+		leitura.setChaveEvento(chaveEvento);
+		leitura.setResponsavelEdicao(responsavel);
+		return LeituraResponseDTO.fromEntity(repository.save(leitura));
+	}
+
+	private void validarDados(LeituraRequestDTO dto) {
+		if (dto.maquinaId() == null || dto.inicioIntervalo() == null || dto.fimIntervalo() == null
+				|| !dto.inicioIntervalo().isBefore(dto.fimIntervalo())
+				|| dto.quantidade() == null || dto.quantidade().signum() < 0
+				|| dto.unidade() == null || dto.unidade().isBlank()
+				|| (dto.chaveEvento() != null
+						&& (dto.chaveEvento().isBlank() || dto.chaveEvento().length() > 64))) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Dados da leitura inválidos");
+		}
 	}
 
 	@Transactional(readOnly = true)
@@ -105,18 +153,13 @@ public class LeituraService {
 		LocalDateTime agora = LocalDateTime.now();
 		boolean semDados = ausenciaService.atualizarEstado(maquina, agora);
 		BigDecimal quantidade = calcularQuantidade(maquina, agora);
+		atualizarAlertasDeProducao(maquina, quantidade);
 
 		StatusProducao status = semDados
 				? StatusProducao.SEM_DADOS
 				: quantidade.compareTo(maquina.getLimiteMin()) < 0
 						? StatusProducao.BAIXA
 						: StatusProducao.NORMAL;
-		if (semDados) {
-			alertaService.resolverAtivos(maquina, TipoRegra.LIMITE_MINIMO);
-		} else {
-			atualizarAlertaBaixaProducao(maquina, quantidade);
-		}
-
 		return new IndicadorProducaoResponseDTO(
 				maquina.getId(),
 				agora.minus(configuracao.getJanelaIndicadores()),
@@ -125,6 +168,21 @@ public class LeituraService {
 				maquina.getLimiteMin(),
 				maquina.getUnidade(),
 				status);
+	}
+
+	@Transactional
+	public void verificarAlertasDeProducao(Long maquinaId) {
+		Maquina maquina = maquinaRepository.findById(maquinaId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Máquina não encontrada"));
+		atualizarAlertasDeProducao(maquina, calcularQuantidade(maquina, LocalDateTime.now()));
+	}
+
+	private void atualizarAlertasDeProducao(Maquina maquina, BigDecimal quantidade) {
+		atualizarAlertaBaixaProducao(maquina, quantidade);
+		BigDecimal limiteSuperproducao = maquina.getLimiteSuperproducao();
+		if (limiteSuperproducao != null && quantidade.compareTo(limiteSuperproducao) > 0) {
+			alertaService.abrirSeNecessario(maquina, TipoRegra.SUPERPRODUCAO);
+		}
 	}
 
 	private BigDecimal calcularQuantidade(Maquina maquina, LocalDateTime agora) {
@@ -159,8 +217,6 @@ public class LeituraService {
 	private void atualizarAlertaBaixaProducao(Maquina maquina, BigDecimal quantidade) {
 		if (quantidade.compareTo(maquina.getLimiteMin()) < 0) {
 			alertaService.abrirSeNecessario(maquina, TipoRegra.LIMITE_MINIMO);
-		} else {
-			alertaService.resolverAtivos(maquina, TipoRegra.LIMITE_MINIMO);
 		}
 	}
 }

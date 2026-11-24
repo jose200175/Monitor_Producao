@@ -4,6 +4,7 @@ package com.industria.monitor.model;
 import jakarta.persistence.*;
 import java.io.Serializable;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -28,6 +29,19 @@ public class Maquina implements Serializable {
 	
 	@Column(name = "intervalo_seg", nullable = false, columnDefinition = "DECIMAL(10,2) DEFAULT 60.00")
     private BigDecimal intervaloSeg;
+
+	@Column(name = "limite_superproducao")
+	private BigDecimal limiteSuperproducao;
+
+	@Column(name = "manutencao_programada_em")
+	private LocalDate manutencaoProgramadaEm;
+
+	@Column(name = "antecedencia_manutencao_dias", nullable = false)
+	private Integer antecedenciaManutencaoDias = 7;
+
+	@ManyToOne
+	@JoinColumn(name = "responsavel_edicao_id")
+	private Trabalhador responsavelEdicao;
 
 	@Column(name = "criado_em", nullable = false, updatable = false)
 	private LocalDateTime criadoEm;
@@ -81,6 +95,38 @@ public class Maquina implements Serializable {
 
 	public void setIntervaloSeg(BigDecimal intervaloSeg) {
 		this.intervaloSeg = intervaloSeg;
+	}
+
+	public BigDecimal getLimiteSuperproducao() {
+		return limiteSuperproducao;
+	}
+
+	public void setLimiteSuperproducao(BigDecimal limiteSuperproducao) {
+		this.limiteSuperproducao = limiteSuperproducao;
+	}
+
+	public LocalDate getManutencaoProgramadaEm() {
+		return manutencaoProgramadaEm;
+	}
+
+	public void setManutencaoProgramadaEm(LocalDate manutencaoProgramadaEm) {
+		this.manutencaoProgramadaEm = manutencaoProgramadaEm;
+	}
+
+	public Integer getAntecedenciaManutencaoDias() {
+		return antecedenciaManutencaoDias;
+	}
+
+	public void setAntecedenciaManutencaoDias(Integer antecedenciaManutencaoDias) {
+		this.antecedenciaManutencaoDias = antecedenciaManutencaoDias;
+	}
+
+	public Trabalhador getResponsavelEdicao() {
+		return responsavelEdicao;
+	}
+
+	public void setResponsavelEdicao(Trabalhador responsavelEdicao) {
+		this.responsavelEdicao = responsavelEdicao;
 	}
 
 	public LocalDateTime getCriadoEm() {

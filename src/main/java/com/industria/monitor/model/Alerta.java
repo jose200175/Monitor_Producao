@@ -42,6 +42,13 @@ public class Alerta implements Serializable {
 	@Enumerated(EnumType.STRING)
 	@Column(name ="estado_alerta", nullable = false)
 	private EstadoAlerta estado;
+
+	@ManyToOne
+	@JoinColumn(name = "responsavel_id")
+	private Trabalhador responsavel;
+
+	@Column(name = "observacoes", columnDefinition = "TEXT")
+	private String observacoes;
 	
 	@CreatedDate
 	@Column(name="criado_em", nullable= false, updatable = false)
@@ -82,6 +89,22 @@ public class Alerta implements Serializable {
 
 	public void setEstado(EstadoAlerta estado) {
 		this.estado = estado;
+	}
+
+	public Trabalhador getResponsavel() {
+		return responsavel;
+	}
+
+	public void setResponsavel(Trabalhador responsavel) {
+		this.responsavel = responsavel;
+	}
+
+	public String getObservacoes() {
+		return observacoes;
+	}
+
+	public void setObservacoes(String observacoes) {
+		this.observacoes = observacoes;
 	}
 
 	public LocalDateTime getCriadoEm() {

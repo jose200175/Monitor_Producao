@@ -13,8 +13,22 @@ public record LeituraResponseDTO(
     BigDecimal quantidade,
     String unidade,
     String chaveEvento,
-    LocalDateTime criadoEm
+    LocalDateTime criadoEm,
+    String codigoResponsavelEdicao
 ) {
+	public LeituraResponseDTO(
+			Long id,
+			Long maquinaId,
+			LocalDateTime inicioIntervalo,
+			LocalDateTime fimIntervalo,
+			BigDecimal quantidade,
+			String unidade,
+			String chaveEvento,
+			LocalDateTime criadoEm) {
+		this(id, maquinaId, inicioIntervalo, fimIntervalo, quantidade,
+				unidade, chaveEvento, criadoEm, null);
+	}
+
     public static LeituraResponseDTO fromEntity(Leitura leitura) {
         return new LeituraResponseDTO(
             leitura.getId(),
@@ -24,7 +38,8 @@ public record LeituraResponseDTO(
             leitura.getQuantidade(),
             leitura.getUnidade(),
             leitura.getChaveEvento(),
-            leitura.getCriadoEm()
+            leitura.getCriadoEm(),
+            leitura.getResponsavelEdicao() == null ? null : leitura.getResponsavelEdicao().getCodigo()
         );
     }
 }
