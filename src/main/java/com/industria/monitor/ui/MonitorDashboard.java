@@ -8,8 +8,11 @@ import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.GraphicsConfiguration;
 import java.awt.GridLayout;
 import java.awt.Insets;
+import java.awt.Rectangle;
+import java.awt.Toolkit;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.math.BigDecimal;
@@ -45,6 +48,7 @@ import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.JTextArea;
+import javax.swing.JWindow;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
@@ -147,6 +151,9 @@ public class MonitorDashboard extends JFrame {
 	private boolean refreshInProgress;
 	private boolean alertSnapshotLoaded;
 	private final Set<Long> knownAlertIds = new HashSet<>();
+	private JWindow alertPopup;
+	private Timer alertBlinkTimer;
+	private Timer alertDismissTimer;
 
 	public MonitorDashboard(MonitorApiClient api) {
 		this.api = api;
@@ -193,6 +200,7 @@ public class MonitorDashboard extends JFrame {
 		addWindowListener(new WindowAdapter() {
 			@Override
 			public void windowClosing(WindowEvent event) {
+				fecharPopupAlerta();
 				simulador.close();
 			}
 		});
@@ -781,9 +789,118 @@ public class MonitorDashboard extends JFrame {
 					return maquina + ": " + ruleLabel(alerta.tipoRegra());
 				})
 				.collect(java.util.stream.Collectors.joining("\n"));
-		JOptionPane.showMessageDialog(this, mensagem,
-				novos.size() == 1 ? "Novo alerta" : "Novos alertas",
-				JOptionPane.WARNING_MESSAGE);
+		mostrarPopupAlerta(
+				novos.size() == 1 ? "NOVO ALERTA" : "NOVOS ALERTAS",
+				mensagem);
+	}
+
+	private void mostrarPopupAlerta(String titulo, String mensagem) {
+		fecharPopupAlerta();
+
+		Color destaque = new Color(217, 119, 6);
+		JLabel indicador = new JLabel("●");
+		indicador.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 16));
+		indicador.setForeground(new Color(220, 65, 75));
+
+		JLabel tituloLabel = new JLabel(titulo);
+		tituloLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+		tituloLabel.setForeground(NAVY);
+		JLabel subtituloLabel = new JLabel("Monitor de produção");
+		subtituloLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+		subtituloLabel.setForeground(MUTED);
+
+		JPanel cabecalhoTexto = new JPanel(new BorderLayout(0, 3));
+		cabecalhoTexto.setOpaque(false);
+		cabecalhoTexto.add(tituloLabel, BorderLayout.NORTH);
+		cabecalhoTexto.add(subtituloLabel, BorderLayout.SOUTH);
+
+		JButton fecharButton = new JButton("×");
+		fecharButton.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 20));
+		fecharButton.setForeground(MUTED);
+		fecharButton.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 0));
+		fecharButton.setContentAreaFilled(false);
+		fecharButton.setFocusPainted(false);
+		fecharButton.setBorderPainted(false);
+		fecharButton.addActionListener(event -> fecharPopupAlerta());
+
+		JPanel cabecalho = new JPanel(new BorderLayout(10, 0));
+		cabecalho.setOpaque(false);
+		cabecalho.add(indicador, BorderLayout.WEST);
+		cabecalho.add(cabecalhoTexto, BorderLayout.CENTER);
+		cabecalho.add(fecharButton, BorderLayout.EAST);
+
+		String mensagemLimitada = mensagem;
+		String[] linhas = mensagem.split("\\R");
+		if (linhas.length > 4) {
+			mensagemLimitada = String.join("\n", java.util.Arrays.copyOf(linhas, 4))
+					+ "\n+" + (linhas.length - 4) + " outros alertas";
+		}
+		JTextArea corpo = new JTextArea(mensagemLimitada);
+		corpo.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+		corpo.setForeground(new Color(65, 79, 99));
+		corpo.setOpaque(false);
+		corpo.setEditable(false);
+		corpo.setFocusable(false);
+		corpo.setLineWrap(true);
+		corpo.setWrapStyleWord(true);
+		corpo.setRows(Math.min(4, Math.max(1, linhas.length)));
+		corpo.setColumns(34);
+		corpo.setBorder(BorderFactory.createEmptyBorder(10, 26, 0, 4));
+
+		JPanel conteudo = new JPanel(new BorderLayout(0, 0));
+		conteudo.setOpaque(false);
+		conteudo.add(cabecalho, BorderLayout.NORTH);
+		conteudo.add(corpo, BorderLayout.CENTER);
+
+		JPanel cartao = new JPanel(new BorderLayout(0, 0));
+		cartao.setBackground(Color.WHITE);
+		cartao.setBorder(BorderFactory.createCompoundBorder(
+				BorderFactory.createLineBorder(new Color(238, 190, 125)),
+				BorderFactory.createEmptyBorder(13, 14, 13, 14)));
+		JPanel faixa = new JPanel();
+		faixa.setBackground(destaque);
+		faixa.setPreferredSize(new Dimension(5, 1));
+		cartao.add(faixa, BorderLayout.WEST);
+		cartao.add(conteudo, BorderLayout.CENTER);
+
+		alertPopup = new JWindow(this);
+		alertPopup.setFocusableWindowState(false);
+		alertPopup.setContentPane(cartao);
+		alertPopup.pack();
+
+		GraphicsConfiguration configuracao = getGraphicsConfiguration();
+		Rectangle limites = configuracao.getBounds();
+		Insets recuos = Toolkit.getDefaultToolkit().getScreenInsets(configuracao);
+		int margem = 18;
+		int x = limites.x + limites.width - recuos.right - alertPopup.getWidth() - margem;
+		int y = limites.y + limites.height - recuos.bottom - alertPopup.getHeight() - margem;
+		alertPopup.setLocation(Math.max(limites.x + recuos.left + margem, x),
+				Math.max(limites.y + recuos.top + margem, y));
+		alertPopup.setVisible(true);
+
+		alertBlinkTimer = new Timer(450, event -> indicador.setForeground(
+				indicador.getForeground().equals(new Color(220, 65, 75))
+						? new Color(248, 177, 82) : new Color(220, 65, 75)));
+		alertBlinkTimer.start();
+		alertDismissTimer = new Timer(8500, event -> fecharPopupAlerta());
+		alertDismissTimer.setRepeats(false);
+		alertDismissTimer.start();
+	}
+
+	private void fecharPopupAlerta() {
+		if (alertBlinkTimer != null) {
+			alertBlinkTimer.stop();
+			alertBlinkTimer = null;
+		}
+		if (alertDismissTimer != null) {
+			alertDismissTimer.stop();
+			alertDismissTimer = null;
+		}
+		if (alertPopup != null) {
+			alertPopup.setVisible(false);
+			alertPopup.dispose();
+			alertPopup = null;
+		}
 	}
 
 	private String formatarJanelaCurta(int segundos) {
