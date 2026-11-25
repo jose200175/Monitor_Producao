@@ -1,5 +1,6 @@
 package com.industria.monitor.service;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
@@ -18,6 +19,8 @@ import jakarta.validation.Valid;
 
 @Service
 public class MaquinaService {
+	private static final BigDecimal INTERVALO_PADRAO_SEG = new BigDecimal("60");
+
 	private final MaquinaRepository repository;
 	private final TrabalhadorRepository trabalhadorRepository;
 	
@@ -28,9 +31,10 @@ public class MaquinaService {
 
 	@Transactional
 	public MaquinaResponseDTO criarMaquina(@Valid MaquinaRequestDTO dto) {
+		exigirDados(dto);
 		Maquina maquina = new Maquina();
 		maquina.setNome(dto.nome());
-		maquina.setIntervaloSeg(dto.intervaloSeg());
+		maquina.setIntervaloSeg(intervaloOuPadrao(dto));
 		maquina.setLimiteMin(dto.limiteMin());
 		maquina.setUnidade(dto.unidade());
 		aplicarConfiguracoes(maquina, dto);
@@ -42,6 +46,7 @@ public class MaquinaService {
 
 	@Transactional
 	public MaquinaResponseDTO atualizar(Long maquinaId, @Valid MaquinaRequestDTO dto) {
+		exigirDados(dto);
 		Maquina maquina = repository.findById(maquinaId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Máquina não encontrada"));
 		if (dto.codigoResponsavelEdicao() == null || dto.codigoResponsavelEdicao().isBlank()) {
@@ -55,10 +60,20 @@ public class MaquinaService {
 		maquina.setNome(dto.nome());
 		maquina.setUnidade(dto.unidade());
 		maquina.setLimiteMin(dto.limiteMin());
-		maquina.setIntervaloSeg(dto.intervaloSeg());
+		maquina.setIntervaloSeg(intervaloOuPadrao(dto));
 		aplicarConfiguracoes(maquina, dto);
 		maquina.setResponsavelEdicao(responsavel);
 		return MaquinaResponseDTO.fromEntity(repository.save(maquina));
+	}
+
+	private void exigirDados(MaquinaRequestDTO dto) {
+		if (dto == null) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Dados da máquina não informados");
+		}
+	}
+
+	private BigDecimal intervaloOuPadrao(MaquinaRequestDTO dto) {
+		return dto.intervaloSeg() == null ? INTERVALO_PADRAO_SEG : dto.intervaloSeg();
 	}
 
 	private void aplicarConfiguracoes(Maquina maquina, MaquinaRequestDTO dto) {

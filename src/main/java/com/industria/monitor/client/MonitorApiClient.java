@@ -6,6 +6,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -23,6 +24,8 @@ import com.industria.monitor.dto.maquina.MaquinaResponseDTO;
 import com.industria.monitor.model.enums.AcaoAlerta;
 
 public class MonitorApiClient {
+
+	private static final int JANELA_PADRAO_SEGUNDOS = 300;
 
 	private final URI baseUri;
 	private final HttpClient httpClient;
@@ -85,24 +88,30 @@ public class MonitorApiClient {
 	public void aplicarAcaoAlerta(
 			Long alertaId, AcaoAlerta acao, String codigoTrabalhador, String observacoes)
 			throws IOException, InterruptedException {
-		enviar("PATCH", "alertas/" + alertaId, Map.of(
-				"acao", acao.name(),
-				"codigoTrabalhador", codigoTrabalhador,
-				"observacoes", observacoes == null ? "" : observacoes));
+		// HashMap aceita valores nulos; Map.of lançaria NullPointerException.
+		// O servidor responde 400 com a mensagem de validação adequada.
+		Map<String, Object> corpo = new HashMap<>();
+		corpo.put("acao", acao == null ? null : acao.name());
+		corpo.put("codigoTrabalhador", codigoTrabalhador);
+		corpo.put("observacoes", observacoes == null ? "" : observacoes);
+		enviar("PATCH", "alertas/" + alertaId, corpo);
 	}
 
 	public int buscarJanelaIndicadoresSegundos() throws IOException, InterruptedException {
 		byte[] resposta = enviar("GET", "configuracoes", null);
-		Map<?, ?> configuracao = objectMapper.readValue(resposta, Map.class);
-		Object segundos = configuracao.get("janelaIndicadoresSegundos");
-		return segundos == null ? 300 : Integer.parseInt(segundos.toString());
+		return lerJanelaIndicadoresSegundos(resposta);
 	}
 
 	public int alterarJanelaIndicadoresSegundos(int segundos) throws IOException, InterruptedException {
 		byte[] resposta = enviar("PUT", "configuracoes",
 				Map.of("janelaIndicadoresSegundos", segundos));
+		return lerJanelaIndicadoresSegundos(resposta);
+	}
+
+	private int lerJanelaIndicadoresSegundos(byte[] resposta) throws IOException {
 		Map<?, ?> configuracao = objectMapper.readValue(resposta, Map.class);
-		return Integer.parseInt(configuracao.get("janelaIndicadoresSegundos").toString());
+		Object segundos = configuracao == null ? null : configuracao.get("janelaIndicadoresSegundos");
+		return segundos == null ? JANELA_PADRAO_SEGUNDOS : Integer.parseInt(segundos.toString());
 	}
 
 	private byte[] enviar(String method, String path, Object body) throws IOException, InterruptedException {
