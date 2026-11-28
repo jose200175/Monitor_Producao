@@ -127,6 +127,9 @@ public class LeituraService {
 	}
 
 	private void validarDados(LeituraRequestDTO dto) {
+		if (dto == null) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Dados da leitura inválidos");
+		}
 		if (dto.maquinaId() == null || dto.inicioIntervalo() == null || dto.fimIntervalo() == null
 				|| !dto.inicioIntervalo().isBefore(dto.fimIntervalo())
 				|| dto.quantidade() == null || dto.quantidade().signum() < 0
